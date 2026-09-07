@@ -33,10 +33,12 @@ pub(super) fn theme_editor(manager: Rc<ThemeManager>) -> (gtk::Revealer, gtk::Fl
         .build();
     panel.append(&editor_actions(
         manager,
-        name,
-        values,
-        error,
-        revealer.clone(),
+        ThemeEditorForm {
+            name,
+            values,
+            error,
+            revealer: revealer.clone(),
+        },
     ));
     (revealer, fields)
 }
@@ -85,16 +87,13 @@ fn color_field_row(
         .build();
     let picker = gtk::ColorDialogButton::new(Some(dialog));
     picker.add_css_class("theme-color-picker");
-    if let Ok(color) = gdk::RGBA::parse(field.get(&values.borrow())) {
+    if let Ok(color) = gdk::RGBA::parse(field.slot(&mut values.borrow_mut()).as_str()) {
         picker.set_rgba(&color);
     }
     let values_for_color = values.clone();
     let manager_for_color = manager.clone();
     picker.connect_rgba_notify(move |picker| {
-        field.set(
-            &mut values_for_color.borrow_mut(),
-            picker.rgba().to_string(),
-        );
+        *field.slot(&mut values_for_color.borrow_mut()) = picker.rgba().to_string();
         manager_for_color.preview(&values_for_color.borrow());
     });
     field_row.append(&picker);
@@ -102,13 +101,20 @@ fn color_field_row(
     field_row
 }
 
-fn editor_actions(
-    manager: Rc<ThemeManager>,
+struct ThemeEditorForm {
     name: gtk::Entry,
     values: Rc<RefCell<ThemeTokens>>,
     error: gtk::Label,
     revealer: gtk::Revealer,
-) -> gtk::Box {
+}
+
+fn editor_actions(manager: Rc<ThemeManager>, form: ThemeEditorForm) -> gtk::Box {
+    let ThemeEditorForm {
+        name,
+        values,
+        error,
+        revealer,
+    } = form;
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     actions.set_halign(gtk::Align::End);
     let cancel = gtk::Button::with_label("Cancel");
@@ -166,22 +172,8 @@ impl ColorField {
         ("Dim text", Self::DimText),
     ];
 
-    fn get(self, tokens: &ThemeTokens) -> &str {
+    fn slot(self, tokens: &mut ThemeTokens) -> &mut String {
         match self {
-            Self::Background => &tokens.background,
-            Self::Surface => &tokens.surface,
-            Self::Text => &tokens.text,
-            Self::Accent => &tokens.accent,
-            Self::Danger => &tokens.danger,
-            Self::Muted => &tokens.muted,
-            Self::Highlight => &tokens.highlight,
-            Self::Border => &tokens.border,
-            Self::DimText => &tokens.dim_text,
-        }
-    }
-
-    fn set(self, tokens: &mut ThemeTokens, value: String) {
-        *match self {
             Self::Background => &mut tokens.background,
             Self::Surface => &mut tokens.surface,
             Self::Text => &mut tokens.text,
@@ -191,6 +183,6 @@ impl ColorField {
             Self::Highlight => &mut tokens.highlight,
             Self::Border => &mut tokens.border,
             Self::DimText => &mut tokens.dim_text,
-        } = value;
+        }
     }
 }
