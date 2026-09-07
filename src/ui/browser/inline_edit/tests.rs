@@ -63,6 +63,161 @@ fn icon_card_bounds(root: &gtk::Widget) -> Vec<(i32, i32, i32, i32)> {
 }
 
 #[test]
+fn clicking_away_from_a_new_folder_submits_and_stays_responsive() {
+    gtk_test(
+        "ui::browser::inline_edit::tests::clicking_away_from_a_new_folder_submits_and_stays_responsive",
+        || {
+            let fixture = tempfile::tempdir().expect("directory fixture");
+            let path = fixture.path().to_path_buf();
+            std::fs::write(fixture.path().join("alpha.txt"), b"alpha").expect("fixture file");
+            std::fs::create_dir(fixture.path().join("Child")).expect("fixture folder");
+            let view = BrowserView::new(
+                Rc::new(crate::adapters::LocalFileSource),
+                PeekBehavior::default(),
+            );
+            view.set_operation_provider(Rc::new(crate::adapters::LocalOperationProvider));
+            view.set_view_mode(BrowserMode::Columns);
+            let window = gtk::Window::builder()
+                .child(&view.widget())
+                .default_width(800)
+                .default_height(600)
+                .build();
+            window.present();
+            let browser = view.browser();
+            browser.navigate(Location::local(&path));
+            wait_until(|| {
+                browser
+                    .column_snapshot(0)
+                    .is_some_and(|snapshot| !snapshot.loading)
+            });
+            wait_until(|| window.is_visible());
+            eprintln!("STEP: column loaded");
+
+            view.state.begin_new_entry(0, Location::local(&path), true);
+            let field = view
+                .state
+                .active_new_entry
+                .borrow()
+                .as_ref()
+                .map(|active| active.field.clone())
+                .expect("a new entry field is open");
+            field.set_text("brand-new-folder");
+            eprintln!("STEP: field ready");
+
+            let controllers = field.observe_controllers();
+            let leave = (0..controllers.n_items())
+                .filter_map(|index| {
+                    controllers
+                        .item(index)
+                        .and_downcast::<gtk::EventControllerFocus>()
+                })
+                .next()
+                .expect("focus controller on the new entry field");
+            leave.emit_by_name::<()>("leave", &[]);
+            eprintln!("STEP: focus-leave emitted");
+            browser.select(0, 1);
+            view.state
+                .columns
+                .borrow()
+                .first()
+                .expect("column")
+                .list
+                .grab_focus();
+            eprintln!("STEP: click selection applied");
+            wait_until(|| view.state.active_new_entry.borrow().is_none());
+            eprintln!("STEP: new entry no longer active");
+            wait_until(|| path.join("brand-new-folder").is_dir());
+            eprintln!("STEP: folder created on disk");
+            wait_until(|| {
+                browser
+                    .column_snapshot(0)
+                    .is_some_and(|snapshot| snapshot.count >= 3)
+                    && view.widget().is_visible()
+            });
+            eprintln!("STEP: folder visible in column");
+            browser.clear_observer();
+            window.destroy();
+        },
+    );
+}
+
+#[test]
+fn list_mode_new_folder_clicking_away_submits_and_stays_responsive() {
+    gtk_test(
+        "ui::browser::inline_edit::tests::list_mode_new_folder_clicking_away_submits_and_stays_responsive",
+        || {
+            let fixture = tempfile::tempdir().expect("directory fixture");
+            let path = fixture.path().to_path_buf();
+            std::fs::write(fixture.path().join("alpha.txt"), b"alpha").expect("fixture file");
+            std::fs::create_dir(fixture.path().join("Child")).expect("fixture folder");
+            let view = BrowserView::new(
+                Rc::new(crate::adapters::LocalFileSource),
+                PeekBehavior::default(),
+            );
+            view.set_operation_provider(Rc::new(crate::adapters::LocalOperationProvider));
+            view.set_view_mode(BrowserMode::List);
+            let window = gtk::Window::builder()
+                .child(&view.widget())
+                .default_width(800)
+                .default_height(600)
+                .build();
+            window.present();
+            let browser = view.browser();
+            browser.navigate(Location::local(&path));
+            wait_until(|| {
+                browser
+                    .column_snapshot(0)
+                    .is_some_and(|snapshot| !snapshot.loading)
+            });
+            wait_until(|| window.is_visible());
+            eprintln!("STEP: list loaded");
+
+            view.state.begin_new_entry(0, Location::local(&path), true);
+            let field = loop {
+                if let Some(field) = view.state.mode_views.borrow().active_new_entry_field() {
+                    break field;
+                }
+                glib::MainContext::default().iteration(false);
+            };
+            field.set_text("brand-new-folder");
+            eprintln!("STEP: field ready");
+            let list = field
+                .ancestor(gtk::ListView::static_type())
+                .and_downcast::<gtk::ListView>()
+                .expect("list view holds the new entry field");
+
+            let controllers = field.observe_controllers();
+            let leave = (0..controllers.n_items())
+                .filter_map(|index| {
+                    controllers
+                        .item(index)
+                        .and_downcast::<gtk::EventControllerFocus>()
+                })
+                .next()
+                .expect("focus controller on the list new entry field");
+            leave.emit_by_name::<()>("leave", &[]);
+            eprintln!("STEP: focus-leave emitted");
+            browser.select(0, 1);
+            list.grab_focus();
+            eprintln!("STEP: click selection applied");
+            wait_until(|| !view.state.mode_views.borrow().new_entry_is_active());
+            eprintln!("STEP: new entry no longer active");
+            wait_until(|| path.join("brand-new-folder").is_dir());
+            eprintln!("STEP: folder created on disk");
+            wait_until(|| {
+                browser
+                    .column_snapshot(0)
+                    .is_some_and(|snapshot| snapshot.count >= 3)
+                    && view.widget().is_visible()
+            });
+            eprintln!("STEP: folder visible in list");
+            browser.clear_observer();
+            window.destroy();
+        },
+    );
+}
+
+#[test]
 fn columns_rename_hides_and_restores_the_size_badge() {
     gtk_test(
         "ui::browser::inline_edit::tests::columns_rename_hides_and_restores_the_size_badge",

@@ -538,6 +538,14 @@ impl ModeViews {
             .map(|rename| rename.field.clone())
     }
 
+    #[cfg(test)]
+    pub(in crate::ui) fn active_new_entry_field(&self) -> Option<gtk::Entry> {
+        self.active_new_entry
+            .borrow()
+            .as_ref()
+            .map(|active| active.field.clone())
+    }
+
     pub fn new_entry_is_active(&self) -> bool {
         self.active_new_entry.borrow().is_some()
     }
@@ -1498,16 +1506,28 @@ fn finish_mode_new_entry(active: &ActiveModeNewEntry) {
     active.field.remove_css_class("error");
     active.field.set_tooltip_text(None);
     active.view.remove_css_class("creating-entry");
-    if let Some(placeholder) = active.placeholder.as_ref() {
-        placeholder.splice(0, placeholder.n_items(), &[]);
-    }
-    if active
-        .source_model
-        .as_ref()
-        .is_some_and(|model| model.n_items() == 0)
-        && let Some(stack) = active.stack.as_ref()
-    {
-        stack.set_visible_child_name("status");
+    // Removing the row is queued for the next idle instead of done here, because
+    // a click-away destroys the row while GTK is still walking an old focus
+    // pointer (see `synthesize_focus_change_events` in GtkWindow). Dropping the row
+    // inside that walk leaves GTK following a freed widget's parent chain to the
+    // window root forever, spinning the main thread.
+    if let (Some(placeholder), Some(stack)) = (active.placeholder.as_ref(), active.stack.as_ref()) {
+        let placeholder = placeholder.clone();
+        let stack = stack.downgrade();
+        let field = active.field.downgrade();
+        let show_status = active
+            .source_model
+            .as_ref()
+            .is_some_and(|model| model.n_items() == 0);
+        glib::idle_add_local_once(move || {
+            // A reopened prompt already replaced the row; its own row must stay.
+            if field.upgrade().is_some() {
+                placeholder.splice(0, placeholder.n_items(), &[]);
+                if show_status && let Some(stack) = stack.upgrade() {
+                    stack.set_visible_child_name("status");
+                }
+            }
+        });
     }
 }
 
