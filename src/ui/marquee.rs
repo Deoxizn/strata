@@ -45,6 +45,7 @@ pub(super) struct MarqueeSetup {
 #[derive(Clone)]
 pub(super) struct Marquee {
     state: Rc<MarqueeState>,
+    gestures: Rc<RefCell<Vec<gtk::GestureDrag>>>,
 }
 
 struct MarqueeState {
@@ -154,9 +155,12 @@ pub(super) fn install(setup: MarqueeSetup) -> Marquee {
             .set(super::pointer::is_background(&origin, x, y));
     });
     connect_drag_progress(&gesture, &state);
-    surface.add_controller(gesture);
+    surface.add_controller(gesture.clone());
 
-    Marquee { state }
+    Marquee {
+        state,
+        gestures: Rc::new(RefCell::new(vec![gesture])),
+    }
 }
 
 impl Marquee {
@@ -197,7 +201,17 @@ impl Marquee {
             state_for_begin.begin(anchor, gesture.current_event_state());
         });
         connect_drag_progress(&gesture, &self.state);
-        surface.add_controller(gesture);
+        surface.add_controller(gesture.clone());
+        self.gestures.borrow_mut().push(gesture);
+    }
+
+    pub(super) fn group_background_click(&self, click: &gtk::GestureClick) {
+        for drag in self.gestures.borrow().iter() {
+            if drag.widget() == click.widget() {
+                // Claiming a marquee press must not deny a click before it can be released.
+                drag.group_with(click);
+            }
+        }
     }
 }
 
