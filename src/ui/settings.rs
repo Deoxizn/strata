@@ -12,7 +12,6 @@ use gtk::{gdk, gio, glib, prelude::*, subclass::prelude::*};
 
 use crate::{
     assets::icons,
-    sandbox::MediaPreviewBackend,
     services::{
         self, BuildKind, Channel, InstallRequest, InstallSource, ManagedInstall, ReleaseMetadata,
         ReleaseNoteBlock, ReleaseNotes, UpdateCheck, UpdateInstall, UpdateMethod, Version,
@@ -20,8 +19,10 @@ use crate::{
 };
 
 mod bindings;
+mod general;
 mod theme;
 use bindings::{bind_choice, bind_switch};
+use general::general_page;
 use theme::theme_page;
 
 #[cfg(test)]
@@ -30,8 +31,7 @@ mod tests;
 use super::{
     blur::BlurBin,
     browser::{dismiss_modal_layer, modal_layer},
-    browser_modes::{BrowserMode, ClickActivation, ClickCount},
-    controls::{menu_option, modal_layout, segmented_control},
+    controls::{modal_layout, segmented_control},
     terminal,
     theme::ThemeManager,
 };
@@ -624,196 +624,6 @@ fn hide(layer: &gtk::Box, button: &gtk::Button, root: &BlurBin) {
         root.set_blurred(false);
         button.remove_css_class("active");
     });
-}
-
-fn general_page(
-    manager: Rc<ThemeManager>,
-) -> (gtk::Widget, Vec<gtk::Box>, Vec<ResponsiveActivationRow>) {
-    let preferences = page_content();
-    append_heading(&preferences, "BROWSING");
-    let peeking_enabled = manager.folder_peeking();
-    let (peeking_row, peeking) = settings_option(
-        "Folder peeking",
-        "Preview folders automatically while moving through a pane.",
-        peeking_enabled,
-    );
-    bind_switch(
-        &manager,
-        &peeking,
-        ThemeManager::folder_peeking,
-        ThemeManager::set_folder_peeking,
-    );
-    preferences.append(&peeking_row);
-
-    let single_click_enabled = manager.single_click_previews();
-    let (preview_row, single_click_previews) = settings_option(
-        "Single-click file previews",
-        "Show a quick preview when selecting a supported file.",
-        single_click_enabled,
-    );
-    bind_switch(
-        &manager,
-        &single_click_previews,
-        ThemeManager::single_click_previews,
-        ThemeManager::set_single_click_previews,
-    );
-    preferences.append(&preview_row);
-
-    let direct_open_enabled = manager.search_open_files_directly();
-    let (search_open_row, search_open_files) = settings_option(
-        "Open search results directly",
-        "Launch files from search instead of opening Strata's quick preview.",
-        direct_open_enabled,
-    );
-    bind_switch(
-        &manager,
-        &search_open_files,
-        ThemeManager::search_open_files_directly,
-        ThemeManager::set_search_open_files_directly,
-    );
-    preferences.append(&search_open_row);
-
-    let type_to_search_enabled = manager.type_to_search();
-    let (type_to_search_row, type_to_search) = settings_option(
-        "Type to search",
-        "Start filtering the active pane when you type in the file browser.",
-        type_to_search_enabled,
-    );
-    bind_switch(
-        &manager,
-        &type_to_search,
-        ThemeManager::type_to_search,
-        ThemeManager::set_type_to_search,
-    );
-    preferences.append(&type_to_search_row);
-
-    append_heading(&preferences, "REFRESH");
-    let interval = manager.auto_refresh_interval();
-    let options = ["Off", "1 min", "5 min", "10 min"];
-    let secs = [0, 60, 300, 600];
-    let active = secs.iter().position(|&s| s == interval).unwrap_or(0);
-    let (control, buttons) = segmented_control(&options, active);
-    let refresh_row = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    refresh_row.add_css_class("settings-option");
-    let refresh_copy = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    refresh_copy.set_hexpand(true);
-    let refresh_title = gtk::Label::new(Some("Auto-refresh interval"));
-    refresh_title.set_xalign(0.0);
-    refresh_title.add_css_class("settings-option-title");
-    let refresh_desc = gtk::Label::new(Some(
-        "Automatically reload the current folder. Useful for network shares where file monitors may miss changes.",
-    ));
-    refresh_desc.set_xalign(0.0);
-    refresh_desc.set_wrap(true);
-    refresh_desc.add_css_class("settings-option-description");
-    refresh_copy.append(&refresh_title);
-    refresh_copy.append(&refresh_desc);
-    refresh_row.append(&refresh_copy);
-    refresh_row.append(&control);
-    preferences.append(&refresh_row);
-    for (idx, button) in buttons.iter().enumerate() {
-        bind_choice(
-            &manager,
-            button,
-            secs[idx],
-            ThemeManager::auto_refresh_interval,
-            ThemeManager::set_auto_refresh_interval,
-        );
-    }
-
-    append_heading(&preferences, "VIDEO PREVIEWS");
-    let (acceleration_active, acceleration_sensitive, backend_sensitive) =
-        video_preview_control_state(manager.hardware_accelerated_video_previews());
-    let description = "Choose a hardware backend.";
-    let selected_backend = manager.video_preview_backend();
-    let (video_row, acceleration, backend) = video_preview_option(
-        description,
-        acceleration_active,
-        acceleration_sensitive,
-        backend_sensitive,
-        selected_backend,
-        &manager,
-    );
-    bind_switch(
-        &manager,
-        &acceleration,
-        ThemeManager::hardware_accelerated_video_previews,
-        ThemeManager::set_hardware_accelerated_video_previews,
-    );
-    manager.bind_preference(
-        &backend,
-        ThemeManager::hardware_accelerated_video_previews,
-        |widget, enabled| widget.set_sensitive(video_preview_control_state(enabled).2),
-    );
-    preferences.append(&video_row);
-
-    append_heading(&preferences, "MOTION");
-    let (motion_row, reduce_motion) = settings_option(
-        "Reduce motion",
-        "Disable nonessential interface animations.",
-        manager.reduce_motion(),
-    );
-    bind_switch(
-        &manager,
-        &reduce_motion,
-        ThemeManager::reduce_motion,
-        ThemeManager::set_reduce_motion,
-    );
-    preferences.append(&motion_row);
-
-    append_heading(&preferences, "CLICK ACTIVATION");
-    let activation_options = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    let mut responsive_activation_rows = Vec::new();
-    activation_options.add_css_class("settings-option");
-    activation_options.add_css_class("click-activation-options");
-    for (label, mode) in [
-        ("Columns", BrowserMode::Columns),
-        ("Icons", BrowserMode::Icons),
-        ("List", BrowserMode::List),
-    ] {
-        let activation = manager.click_activation(mode);
-        let (row, options, file_buttons, folder_buttons) =
-            click_activation_option(label, activation);
-        for (buttons, files) in [(&file_buttons, true), (&folder_buttons, false)] {
-            for (button, count) in buttons.iter().zip([ClickCount::One, ClickCount::Two]) {
-                bind_choice(
-                    &manager,
-                    button,
-                    count,
-                    move |manager| {
-                        let activation = manager.click_activation(mode);
-                        if files {
-                            activation.files
-                        } else {
-                            activation.folders
-                        }
-                    },
-                    move |manager, count| {
-                        let mut activation = manager.click_activation(mode);
-                        if files {
-                            activation.files = count;
-                        } else {
-                            activation.folders = count;
-                        }
-                        manager.set_click_activation(mode, activation);
-                    },
-                );
-            }
-        }
-        activation_options.append(&row);
-        responsive_activation_rows.push(ResponsiveActivationRow { row, options });
-    }
-    preferences.append(&activation_options);
-
-    append_heading(&preferences, "DESKTOP INTEGRATION");
-    let portal_row = super::portal_preferences::settings_row();
-    preferences.append(&portal_row);
-
-    (
-        scrollable_page(&preferences, None),
-        vec![video_row, portal_row],
-        responsive_activation_rows,
-    )
 }
 
 fn updates_page(
@@ -2474,59 +2284,6 @@ fn page_content() -> gtk::Box {
     content
 }
 
-fn click_activation_option(
-    mode: &str,
-    activation: ClickActivation,
-) -> (
-    gtk::Box,
-    Vec<gtk::Box>,
-    Vec<gtk::ToggleButton>,
-    Vec<gtk::ToggleButton>,
-) {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    row.add_css_class("click-activation-row");
-    let title = gtk::Label::new(Some(mode));
-    title.set_xalign(0.0);
-    title.set_width_chars(8);
-    title.add_css_class("settings-option-title");
-    row.append(&title);
-
-    let selected = |count| usize::from(count == ClickCount::Two);
-    let (file_control, file_buttons) =
-        segmented_control(&["1 click", "2 clicks"], selected(activation.files));
-    let (folder_control, folder_buttons) =
-        segmented_control(&["1 click", "2 clicks"], selected(activation.folders));
-    let mut options = Vec::new();
-    for (label, control, buttons) in [
-        ("Files", &file_control, &file_buttons),
-        ("Folders", &folder_control, &folder_buttons),
-    ] {
-        let option = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        option.set_hexpand(true);
-        let label = gtk::Label::new(Some(label));
-        label.set_xalign(0.0);
-        label.set_width_chars(7);
-        label.add_css_class("settings-option-description");
-        control.set_hexpand(true);
-        control.add_css_class("click-activation-control");
-        // Twelve buttons on this page read "1 click" or "2 clicks". Naming each
-        // one after its row and its column turns them into distinguishable
-        // choices such as "List Folders 1 click".
-        for button in buttons {
-            button.update_relation(&[gtk::accessible::Relation::LabelledBy(&[
-                title.upcast_ref(),
-                label.upcast_ref(),
-                button.upcast_ref(),
-            ])]);
-        }
-        option.append(&label);
-        option.append(control);
-        row.append(&option);
-        options.push(option);
-    }
-    (row, options, file_buttons, folder_buttons)
-}
-
 fn settings_option(title: &str, description: &str, active: bool) -> (gtk::Box, gtk::Switch) {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 16);
     row.add_css_class("settings-option");
@@ -2555,97 +2312,6 @@ fn settings_option(title: &str, description: &str, active: bool) -> (gtk::Box, g
     row.append(&copy);
     row.append(&toggle);
     (row, toggle)
-}
-
-fn video_preview_option(
-    description: &str,
-    active: bool,
-    toggle_sensitive: bool,
-    backend_sensitive: bool,
-    selected_backend: MediaPreviewBackend,
-    manager: &Rc<ThemeManager>,
-) -> (gtk::Box, gtk::Switch, gtk::MenuButton) {
-    let (row, toggle) = settings_option(
-        "Use hardware acceleration for video previews.",
-        description,
-        active,
-    );
-    row.remove(&toggle);
-
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    content.add_css_class("column-menu");
-    let options = [
-        ("Automatic", MediaPreviewBackend::Automatic),
-        ("VA-API", MediaPreviewBackend::VaApi),
-        ("Vulkan", MediaPreviewBackend::Vulkan),
-    ]
-    .map(|(label, value)| {
-        let (option, check) = menu_option(label, selected_backend == value);
-        content.append(&option);
-        (label, value, option, check)
-    });
-    let popover = gtk::Popover::builder()
-        .child(&content)
-        .has_arrow(false)
-        .halign(gtk::Align::End)
-        .position(gtk::PositionType::Bottom)
-        .build();
-    popover.add_css_class("column-popover");
-    let backend = gtk::MenuButton::builder()
-        .label(video_preview_backend_label(selected_backend))
-        .always_show_arrow(true)
-        .popover(&popover)
-        .build();
-    backend.add_css_class("form-control");
-    backend.set_sensitive(backend_sensitive);
-    backend.set_valign(gtk::Align::Center);
-    backend.update_property(&[
-        gtk::accessible::Property::Label("Video preview hardware backend"),
-        gtk::accessible::Property::Description(description),
-    ]);
-    manager.bind_preference(
-        &backend,
-        ThemeManager::video_preview_backend,
-        |widget, selected| {
-            if let Some(button) = widget.downcast_ref::<gtk::MenuButton>() {
-                button.set_label(video_preview_backend_label(selected));
-            }
-        },
-    );
-    for (_, value, option, check) in options {
-        manager.bind_preference(
-            &check,
-            ThemeManager::video_preview_backend,
-            move |widget, selected| widget.set_visible(selected == value),
-        );
-        let backend = backend.downgrade();
-        let manager = manager.clone();
-        option.connect_clicked(move |_| {
-            manager.set_video_preview_backend(value);
-            if let Some(backend) = backend.upgrade() {
-                backend.popdown();
-            }
-        });
-    }
-    toggle.set_sensitive(toggle_sensitive);
-    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    controls.set_valign(gtk::Align::Center);
-    controls.append(&backend);
-    controls.append(&toggle);
-    row.append(&controls);
-    (row, toggle, backend)
-}
-
-fn video_preview_backend_label(backend: MediaPreviewBackend) -> &'static str {
-    match backend {
-        MediaPreviewBackend::Automatic | MediaPreviewBackend::Software => "Automatic",
-        MediaPreviewBackend::VaApi => "VA-API",
-        MediaPreviewBackend::Vulkan => "Vulkan",
-    }
-}
-
-fn video_preview_control_state(enabled: bool) -> (bool, bool, bool) {
-    (enabled, true, enabled)
 }
 
 fn append_heading(container: &gtk::Box, text: &str) -> gtk::Label {

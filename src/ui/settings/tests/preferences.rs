@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::super::*;
+use crate::sandbox::MediaPreviewBackend;
 use crate::test_support::gtk_test;
 use crate::ui::theme::TextSize;
 
