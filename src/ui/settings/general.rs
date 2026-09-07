@@ -23,39 +23,7 @@ pub(super) fn general_page(
     manager: Rc<ThemeManager>,
 ) -> (gtk::Widget, Vec<gtk::Box>, Vec<ResponsiveActivationRow>) {
     let preferences = page_content();
-    append_heading(&preferences, "BROWSING");
-    append_preference_switch(
-        &preferences,
-        &manager,
-        "Folder peeking",
-        "Preview folders automatically while moving through a pane.",
-        ThemeManager::folder_peeking,
-        ThemeManager::set_folder_peeking,
-    );
-    append_preference_switch(
-        &preferences,
-        &manager,
-        "Single-click file previews",
-        "Show a quick preview when selecting a supported file.",
-        ThemeManager::single_click_previews,
-        ThemeManager::set_single_click_previews,
-    );
-    append_preference_switch(
-        &preferences,
-        &manager,
-        "Open search results directly",
-        "Launch files from search instead of opening Strata's quick preview.",
-        ThemeManager::search_open_files_directly,
-        ThemeManager::set_search_open_files_directly,
-    );
-    append_preference_switch(
-        &preferences,
-        &manager,
-        "Type to search",
-        "Start filtering the active pane when you type in the file browser.",
-        ThemeManager::type_to_search,
-        ThemeManager::set_type_to_search,
-    );
+    append_browsing_options(&preferences, &manager);
 
     append_heading(&preferences, "REFRESH");
     append_auto_refresh_option(&preferences, &manager);
@@ -67,10 +35,12 @@ pub(super) fn general_page(
     append_preference_switch(
         &preferences,
         &manager,
-        "Reduce motion",
-        "Disable nonessential interface animations.",
-        ThemeManager::reduce_motion,
-        ThemeManager::set_reduce_motion,
+        PreferenceSwitch {
+            title: "Reduce motion",
+            description: "Disable nonessential interface animations.",
+            read: ThemeManager::reduce_motion,
+            write: ThemeManager::set_reduce_motion,
+        },
     );
 
     append_heading(&preferences, "CLICK ACTIVATION");
@@ -87,16 +57,53 @@ pub(super) fn general_page(
     )
 }
 
+#[derive(Clone, Copy)]
+struct PreferenceSwitch {
+    title: &'static str,
+    description: &'static str,
+    read: fn(&ThemeManager) -> bool,
+    write: fn(&ThemeManager, bool),
+}
+
+fn append_browsing_options(content: &gtk::Box, manager: &Rc<ThemeManager>) {
+    append_heading(content, "BROWSING");
+    for switch in [
+        PreferenceSwitch {
+            title: "Folder peeking",
+            description: "Preview folders automatically while moving through a pane.",
+            read: ThemeManager::folder_peeking,
+            write: ThemeManager::set_folder_peeking,
+        },
+        PreferenceSwitch {
+            title: "Single-click file previews",
+            description: "Show a quick preview when selecting a supported file.",
+            read: ThemeManager::single_click_previews,
+            write: ThemeManager::set_single_click_previews,
+        },
+        PreferenceSwitch {
+            title: "Open search results directly",
+            description: "Launch files from search instead of opening Strata's quick preview.",
+            read: ThemeManager::search_open_files_directly,
+            write: ThemeManager::set_search_open_files_directly,
+        },
+        PreferenceSwitch {
+            title: "Type to search",
+            description: "Start filtering the active pane when you type in the file browser.",
+            read: ThemeManager::type_to_search,
+            write: ThemeManager::set_type_to_search,
+        },
+    ] {
+        append_preference_switch(content, manager, switch);
+    }
+}
+
 fn append_preference_switch(
     content: &gtk::Box,
     manager: &Rc<ThemeManager>,
-    title: &str,
-    description: &str,
-    read: fn(&ThemeManager) -> bool,
-    write: fn(&ThemeManager, bool),
+    switch: PreferenceSwitch,
 ) {
-    let (row, toggle) = settings_option(title, description, read(manager));
-    bind_switch(manager, &toggle, read, write);
+    let (row, toggle) = settings_option(switch.title, switch.description, (switch.read)(manager));
+    bind_switch(manager, &toggle, switch.read, switch.write);
     content.append(&row);
 }
 
@@ -183,19 +190,24 @@ fn bind_click_activation_row(
     let (row, options, file_buttons, folder_buttons) = click_activation_option(label, activation);
     for (buttons, files) in [(&file_buttons, true), (&folder_buttons, false)] {
         for (button, count) in buttons.iter().zip([ClickCount::One, ClickCount::Two]) {
-            bind_click_count(manager, button, mode, files, count);
+            bind_click_count(manager, button, ClickCountBinding { mode, files, count });
         }
     }
     (row, options)
 }
 
-fn bind_click_count(
-    manager: &Rc<ThemeManager>,
-    button: &gtk::ToggleButton,
+struct ClickCountBinding {
     mode: BrowserMode,
     files: bool,
     count: ClickCount,
+}
+
+fn bind_click_count(
+    manager: &Rc<ThemeManager>,
+    button: &gtk::ToggleButton,
+    binding: ClickCountBinding,
 ) {
+    let ClickCountBinding { mode, files, count } = binding;
     bind_choice(
         manager,
         button,
@@ -279,16 +291,30 @@ fn video_preview_option(
 ) -> (gtk::Box, gtk::Switch, gtk::MenuButton) {
     let (active, toggle_sensitive, backend_sensitive) =
         video_preview_control_state(manager.hardware_accelerated_video_previews());
-    let selected_backend = manager.video_preview_backend();
     let (row, toggle) = settings_option(
         "Use hardware acceleration for video previews.",
         description,
         active,
     );
     row.remove(&toggle);
+    let backend = video_preview_backend_control(manager, description, backend_sensitive);
+    toggle.set_sensitive(toggle_sensitive);
+    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    controls.set_valign(gtk::Align::Center);
+    controls.append(&backend);
+    controls.append(&toggle);
+    row.append(&controls);
+    (row, toggle, backend)
+}
 
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    content.add_css_class("column-menu");
+fn video_preview_backend_control(
+    manager: &Rc<ThemeManager>,
+    description: &str,
+    backend_sensitive: bool,
+) -> gtk::MenuButton {
+    let selected_backend = manager.video_preview_backend();
+    let menu = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    menu.add_css_class("column-menu");
     let options = [
         ("Automatic", MediaPreviewBackend::Automatic),
         ("VA-API", MediaPreviewBackend::VaApi),
@@ -296,11 +322,11 @@ fn video_preview_option(
     ]
     .map(|(label, value)| {
         let (option, check) = menu_option(label, selected_backend == value);
-        content.append(&option);
-        (label, value, option, check)
+        menu.append(&option);
+        (value, option, check)
     });
     let popover = gtk::Popover::builder()
-        .child(&content)
+        .child(&menu)
         .has_arrow(false)
         .halign(gtk::Align::End)
         .position(gtk::PositionType::Bottom)
@@ -318,8 +344,17 @@ fn video_preview_option(
         gtk::accessible::Property::Label("Video preview hardware backend"),
         gtk::accessible::Property::Description(description),
     ]);
+    bind_video_preview_backend_menu(manager, &backend, options);
+    backend
+}
+
+fn bind_video_preview_backend_menu(
+    manager: &Rc<ThemeManager>,
+    backend: &gtk::MenuButton,
+    options: [(MediaPreviewBackend, gtk::Button, gtk::Image); 3],
+) {
     manager.bind_preference(
-        &backend,
+        backend,
         ThemeManager::video_preview_backend,
         |widget, selected| {
             if let Some(button) = widget.downcast_ref::<gtk::MenuButton>() {
@@ -327,7 +362,7 @@ fn video_preview_option(
             }
         },
     );
-    for (_, value, option, check) in options {
+    for (value, option, check) in options {
         manager.bind_preference(
             &check,
             ThemeManager::video_preview_backend,
@@ -342,13 +377,6 @@ fn video_preview_option(
             }
         });
     }
-    toggle.set_sensitive(toggle_sensitive);
-    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    controls.set_valign(gtk::Align::Center);
-    controls.append(&backend);
-    controls.append(&toggle);
-    row.append(&controls);
-    (row, toggle, backend)
 }
 
 pub(super) fn video_preview_backend_label(backend: MediaPreviewBackend) -> &'static str {
