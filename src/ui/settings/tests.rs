@@ -15,10 +15,10 @@ use super::{
     channel_index, effective_update_channel, force_due_update_check, install_guard,
     installed_version_status, is_stale_check, managed_channel_description, managed_install_summary,
     offer_still_eligible, omarchy_update_command, resolve_update_method_async,
-    responsive_dialog_size, shows_available_release_notes, theme_background_is_light,
-    theme_name_matches, update_check_due, update_check_message, update_dialog_status,
-    update_status_markup, uses_compact_navigation, video_preview_backend_label,
-    video_preview_control_state,
+    responsive_dialog_size, shows_available_release_notes,
+    theme::{theme_background_is_light, theme_name_matches},
+    update_check_due, update_check_message, update_dialog_status, update_status_markup,
+    uses_compact_navigation, video_preview_backend_label, video_preview_control_state,
 };
 use crate::sandbox::MediaPreviewBackend;
 
