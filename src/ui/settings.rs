@@ -660,17 +660,45 @@ fn updates_page(
         update_method,
     );
 
-    let auto_check_enabled = manager.checks_for_updates();
-    let auto_check_row = automatic_updates_option(&manager, update_method);
-    preferences.append(&auto_check_row);
+    preferences.append(&automatic_updates_option(&manager, update_method));
+    let (channel_row, sync_channel_selection) =
+        append_channel_option(&preferences, manager.clone(), managed, update_method);
+    preferences.append(&update_row);
+    append_current_release_notes(&preferences);
+    bind_updates_auto_check(
+        &manager,
+        &channel_row,
+        &preferences,
+        run_check.clone(),
+        update_notice,
+    );
 
+    let page = scrollable_page(&preferences, None);
+    wire_channel_change_check(
+        &manager,
+        &page,
+        sync_channel_selection,
+        run_check,
+        install_underway,
+    );
+    (page, vec![responsive_action])
+}
+
+fn append_channel_option(
+    preferences: &gtk::Box,
+    manager: Rc<ThemeManager>,
+    managed: Option<&ManagedInstall>,
+    update_method: UpdateMethod,
+) -> (gtk::Box, Rc<dyn Fn()>) {
     let (channel_row, sync_channel_selection) = channel_option(manager.clone(), managed);
-    channel_row.set_sensitive(auto_check_enabled);
+    channel_row.set_sensitive(manager.checks_for_updates());
     channel_row.set_visible(managed.is_some() || !update_method.is_package_managed());
     preferences.append(&channel_row);
-    preferences.append(&update_row);
+    (channel_row, sync_channel_selection)
+}
 
-    append_heading(&preferences, "RELEASE NOTES");
+fn append_current_release_notes(preferences: &gtk::Box) {
+    append_heading(preferences, "RELEASE NOTES");
     let current_notes = release_notes_card(
         &format!(
             "Current release · v{}",
@@ -680,42 +708,54 @@ fn updates_page(
     );
     preferences.append(&current_notes.container);
     load_current_release_notes(&current_notes);
+}
 
+fn bind_updates_auto_check(
+    manager: &Rc<ThemeManager>,
+    channel_row: &gtk::Box,
+    preferences: &gtk::Box,
+    run_check: Rc<dyn Fn(bool)>,
+    update_notice: UpdateNoticeHandler,
+) {
     manager.bind_preference(
-        &channel_row,
+        channel_row,
         ThemeManager::checks_for_updates,
         |widget, enabled| widget.set_sensitive(enabled),
     );
-    let toggled_check = run_check.clone();
     let initial = Cell::new(true);
     manager.bind_preference(
-        &preferences,
+        preferences,
         ThemeManager::checks_for_updates,
         move |_, enabled| {
             if initial.replace(false) {
                 return;
             }
             if enabled {
-                toggled_check(false);
+                run_check(false);
             } else {
                 update_notice(None);
             }
         },
     );
-    // No automatic check here: the due scheduler owns background checks process-wide.
+}
 
-    let page = scrollable_page(&preferences, None);
-    let broadcast_check = run_check.clone();
+fn wire_channel_change_check(
+    manager: &Rc<ThemeManager>,
+    page: &impl IsA<gtk::Widget>,
+    sync_channel_selection: Rc<dyn Fn()>,
+    run_check: Rc<dyn Fn(bool)>,
+    install_underway: Rc<dyn Fn() -> bool>,
+) {
+    // No automatic check here: the due scheduler owns background checks process-wide.
     manager.on_release_channel_changed(
-        &page,
+        page,
         Rc::new(move || {
             sync_channel_selection();
             if !install_underway() {
-                broadcast_check(false);
+                run_check(false);
             }
         }),
     );
-    (page, vec![responsive_action])
 }
 
 fn automatic_updates_option(manager: &Rc<ThemeManager>, method: UpdateMethod) -> gtk::Box {
