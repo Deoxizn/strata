@@ -10,7 +10,7 @@ use gtk::{gdk, glib, prelude::*};
 use crate::{
     assets::icons,
     ui::{
-        controls::{form_entry, segmented_control},
+        controls::segmented_control,
         theme::{TextSize, Theme, ThemeManager, ThemeTokens},
     },
 };
@@ -20,6 +20,9 @@ use super::{
     bindings::{bind_choice, bind_switch},
     page_content, scrollable_page,
 };
+
+mod editor;
+use editor::theme_editor;
 
 pub(super) fn theme_page(manager: Rc<ThemeManager>) -> (gtk::Widget, Vec<(gtk::FlowBox, u32)>) {
     let content = page_content();
@@ -452,150 +455,6 @@ fn theme_preview(tokens: &ThemeTokens) -> gtk::DrawingArea {
         }
     });
     area
-}
-
-fn theme_editor(manager: Rc<ThemeManager>) -> (gtk::Revealer, gtk::FlowBox) {
-    let panel = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    panel.add_css_class("theme-editor");
-    let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let title = gtk::Label::new(Some("Add a theme"));
-    title.add_css_class("settings-option-title");
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
-    header.append(&title);
-    panel.append(&header);
-    let name = form_entry();
-    name.set_placeholder_text(Some("Theme name"));
-    panel.append(&name);
-
-    let values = Rc::new(RefCell::new(manager.starter_tokens()));
-    let fields = gtk::FlowBox::builder()
-        .column_spacing(18)
-        .row_spacing(10)
-        .max_children_per_line(4)
-        .min_children_per_line(1)
-        .selection_mode(gtk::SelectionMode::None)
-        .homogeneous(true)
-        .build();
-    fields.add_css_class("theme-color-fields");
-    for (label_text, field) in [
-        ("Background", ColorField::Background),
-        ("Surface", ColorField::Surface),
-        ("Text", ColorField::Text),
-        ("Accent", ColorField::Accent),
-        ("Danger", ColorField::Danger),
-        ("Muted", ColorField::Muted),
-        ("Highlight", ColorField::Highlight),
-        ("Border", ColorField::Border),
-        ("Dim text", ColorField::DimText),
-    ] {
-        let field_row = gtk::Box::new(gtk::Orientation::Horizontal, 7);
-        let label = gtk::Label::new(Some(label_text));
-        label.set_xalign(0.0);
-        let dialog = gtk::ColorDialog::builder()
-            .title(format!("Choose {label_text}"))
-            .with_alpha(false)
-            .build();
-        let picker = gtk::ColorDialogButton::new(Some(dialog));
-        picker.add_css_class("theme-color-picker");
-        if let Ok(color) = gdk::RGBA::parse(field.get(&values.borrow())) {
-            picker.set_rgba(&color);
-        }
-        let values_for_color = values.clone();
-        let manager_for_color = manager.clone();
-        picker.connect_rgba_notify(move |picker| {
-            field.set(
-                &mut values_for_color.borrow_mut(),
-                picker.rgba().to_string(),
-            );
-            manager_for_color.preview(&values_for_color.borrow());
-        });
-        field_row.append(&picker);
-        field_row.append(&label);
-        fields.insert(&field_row, -1);
-    }
-    panel.append(&fields);
-    let error = gtk::Label::new(None);
-    error.add_css_class("theme-editor-error");
-    error.set_xalign(0.0);
-    error.set_visible(false);
-    panel.append(&error);
-    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    actions.set_halign(gtk::Align::End);
-    let cancel = gtk::Button::with_label("Cancel");
-    cancel.add_css_class("action-dialog-cancel");
-    let save = gtk::Button::with_label("Add theme");
-    save.add_css_class("action-dialog-confirm");
-    actions.append(&cancel);
-    actions.append(&save);
-    panel.append(&actions);
-    let revealer = gtk::Revealer::builder()
-        .transition_type(gtk::RevealerTransitionType::SlideDown)
-        .child(&panel)
-        .build();
-    let hidden = revealer.clone();
-    let manager_for_cancel = manager.clone();
-    cancel.connect_clicked(move |_| {
-        manager_for_cancel.cancel_preview();
-        hidden.set_reveal_child(false);
-    });
-    let hidden = revealer.clone();
-    save.connect_clicked(move |_| {
-        let mut tokens = values.borrow().clone();
-        tokens.name = name.text().trim().to_owned();
-        match manager.save_custom_theme(tokens) {
-            Ok(_) => {
-                error.set_visible(false);
-                hidden.set_reveal_child(false);
-            }
-            Err(message) => {
-                error.set_text(&message.to_string());
-                error.set_visible(true);
-            }
-        }
-    });
-    (revealer, fields)
-}
-
-#[derive(Clone, Copy)]
-enum ColorField {
-    Background,
-    Surface,
-    Text,
-    Accent,
-    Danger,
-    Muted,
-    Highlight,
-    Border,
-    DimText,
-}
-impl ColorField {
-    fn get(self, tokens: &ThemeTokens) -> &str {
-        match self {
-            Self::Background => &tokens.background,
-            Self::Surface => &tokens.surface,
-            Self::Text => &tokens.text,
-            Self::Accent => &tokens.accent,
-            Self::Danger => &tokens.danger,
-            Self::Muted => &tokens.muted,
-            Self::Highlight => &tokens.highlight,
-            Self::Border => &tokens.border,
-            Self::DimText => &tokens.dim_text,
-        }
-    }
-    fn set(self, tokens: &mut ThemeTokens, value: String) {
-        *match self {
-            Self::Background => &mut tokens.background,
-            Self::Surface => &mut tokens.surface,
-            Self::Text => &mut tokens.text,
-            Self::Accent => &mut tokens.accent,
-            Self::Danger => &mut tokens.danger,
-            Self::Muted => &mut tokens.muted,
-            Self::Highlight => &mut tokens.highlight,
-            Self::Border => &mut tokens.border,
-            Self::DimText => &mut tokens.dim_text,
-        } = value;
-    }
 }
 
 trait RoundedRectangle {
