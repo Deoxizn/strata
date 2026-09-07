@@ -878,14 +878,13 @@ impl ModeViews {
             BrowserEvent::ColumnAdded { depth, .. }
                 if self.browser.active_depth() == Some(*depth) =>
             {
+                self.browser.select_first_on_load(*depth);
                 match self.mode {
                     BrowserMode::Columns => {}
                     BrowserMode::Icons => {
-                        self.browser.select_first_on_load(*depth);
                         self.rebuild_icons();
                     }
                     BrowserMode::List => {
-                        self.browser.select_first_on_load(*depth);
                         self.rebuild_list();
                     }
                 }
@@ -1953,12 +1952,15 @@ fn build_icons_view(context: &Rc<IconsContext>, model: &impl IsA<gio::ListModel>
     let factory = gtk::SignalListItemFactory::new();
     let bound_items_for_setup = bound_items.clone();
     let selection_for_setup = selection.clone();
-    let selection_anchor = Rc::new(Cell::new(None::<u32>));
     let browser_for_setup = Rc::downgrade(&context.browser);
     let previews_for_setup = context.click.previews.clone();
     let activation_for_setup = context.click.activation.clone();
     let filtered_for_setup = view_model.clone();
     let source_index_for_setup = context.source_index.clone();
+    let positions_for_setup = PanePositions {
+        index: source_index_for_setup.clone(),
+        view: filtered_for_setup.clone(),
+    };
     let transfers_for_setup = context.transfer.clone();
     let peek_for_setup = context.state.clone();
     let thumbnail_size_for_setup = context.thumbnail_size.clone();
@@ -1981,7 +1983,9 @@ fn build_icons_view(context: &Rc<IconsContext>, model: &impl IsA<gio::ListModel>
             &card,
             item,
             selection_for_setup.clone(),
-            selection_anchor.clone(),
+            browser_for_setup.clone(),
+            depth,
+            positions_for_setup.clone(),
         );
         install_icons_peek(
             &card,
@@ -2608,7 +2612,6 @@ fn build_list_pane(
     let bound_items: Rc<RefCell<Vec<BoundModeItem>>> = Rc::new(RefCell::new(Vec::new()));
     let bound_items_for_setup = bound_items.clone();
     let selection_for_setup = selection.clone();
-    let selection_anchor = Rc::new(Cell::new(None::<u32>));
     let browser_for_setup = Rc::downgrade(&browser);
     let previews_for_setup = click_options.previews;
     let activation_for_setup = click_options.activation;
@@ -2616,6 +2619,10 @@ fn build_list_pane(
     let active_for_setup = active_new_entry.clone();
     let source_index_for_setup = source_index.clone();
     let view_model_for_setup = view_model_object.clone();
+    let positions_for_setup = PanePositions {
+        index: source_index_for_setup.clone(),
+        view: view_model_for_setup.clone(),
+    };
     let folder_location = browser.location_at(depth);
     let scrolling = Rc::new(Cell::new(false));
     let scrolling_for_setup = scrolling.clone();
@@ -2692,7 +2699,9 @@ fn build_list_pane(
             &row,
             item,
             selection_for_setup.clone(),
-            selection_anchor.clone(),
+            browser_for_setup.clone(),
+            depth,
+            positions_for_setup.clone(),
         );
         install_list_drag_drop(
             &row,
@@ -3354,11 +3363,37 @@ fn install_list_drag_drop(
     row.add_controller(drop);
 }
 
+#[derive(Clone)]
+struct PanePositions {
+    index: SourceIndexMap,
+    view: gio::ListModel,
+}
+
+impl PanePositions {
+    fn source_position(&self, view_position: u32) -> Option<usize> {
+        source_position_for_view(&self.index, Some(&self.view), view_position)
+    }
+
+    fn view_position(&self, source_position: usize) -> Option<u32> {
+        let guessed = source_position as u32;
+        // Unfiltered views keep source order; a leading placeholder shifts by one.
+        [guessed, guessed.saturating_add(1)]
+            .into_iter()
+            .find(|candidate| self.source_position(*candidate) == Some(source_position))
+            .or_else(|| {
+                (0..self.view.n_items())
+                    .find(|candidate| self.source_position(*candidate) == Some(source_position))
+            })
+    }
+}
+
 fn install_modified_selection_click(
     widget: &impl IsA<gtk::Widget>,
     item: &gtk::ListItem,
     selection: gtk::MultiSelection,
-    anchor: Rc<Cell<Option<u32>>>,
+    browser: Weak<Browser>,
+    depth: usize,
+    positions: PanePositions,
 ) {
     let click = gtk::GestureClick::new();
     click.set_button(1);
@@ -3372,29 +3407,37 @@ fn install_modified_selection_click(
         if position == gtk::INVALID_LIST_POSITION {
             return;
         }
+        let Some(browser) = browser.upgrade() else {
+            return;
+        };
         let modifiers = gesture.current_event_state();
         let control = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
         let shift = modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK);
         if shift {
-            let anchor = anchor.get().unwrap_or(position);
+            let anchor = browser
+                .selection_anchor_position(depth)
+                .and_then(|anchor| positions.view_position(anchor))
+                .unwrap_or(position);
             let start = anchor.min(position);
             let count = anchor.max(position).saturating_sub(start) + 1;
             selection.select_range(start, count, true);
         } else if control {
-            anchor.set(Some(position));
+            anchor_at(&browser, depth, &positions, position);
             if selection.is_selected(position) {
                 selection.unselect_item(position);
             } else {
                 selection.select_item(position, false);
             }
         } else {
-            anchor.set(Some(position));
+            anchor_at(&browser, depth, &positions, position);
             return;
         }
-        if gesture
-            .widget()
-            .is_some_and(|widget| super::pointer::hits_item_content(&widget, x, y))
+        if let Some(widget) = gesture.widget()
+            && super::pointer::hits_item_content(&widget, x, y)
         {
+            if let Some(item_widget) = widget.parent() {
+                item_widget.grab_focus();
+            }
             gesture.set_state(gtk::EventSequenceState::Claimed);
         }
     });
@@ -3407,6 +3450,12 @@ fn install_modified_selection_click(
         }
     });
     widget.add_controller(click);
+}
+
+fn anchor_at(browser: &Rc<Browser>, depth: usize, positions: &PanePositions, view_position: u32) {
+    if let Some(source_position) = positions.source_position(view_position) {
+        browser.set_selection_anchor(depth, source_position);
+    }
 }
 
 fn source_position_for_view(

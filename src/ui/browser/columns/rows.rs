@@ -33,6 +33,18 @@ use std::{
     time::Duration,
 };
 
+fn anchored_row(state: &std::rc::Weak<ViewState>, depth: usize, map: &ViewMap) -> Option<u32> {
+    let state = state.upgrade()?;
+    let anchor = state.browser.selection_anchor_position(depth)?;
+    map.view_position(anchor)
+}
+
+fn anchor_at(state: &std::rc::Weak<ViewState>, depth: usize, map: &ViewMap, row: u32) {
+    if let (Some(state), Some(source_position)) = (state.upgrade(), map.source_position(row)) {
+        state.browser.set_selection_anchor(depth, source_position);
+    }
+}
+
 pub(super) struct ColumnRows {
     pub(super) factory: gtk::SignalListItemFactory,
     pub(super) bound_rows: Rc<RefCell<Vec<BoundRow>>>,
@@ -53,7 +65,6 @@ pub(super) fn column_rows(
     let weak_state = Rc::downgrade(state);
     let modified_selection_for_rows = modified_selection.clone();
     let selection_for_rows = selection.clone();
-    let mouse_selection_anchor = Rc::new(Cell::new(None::<u32>));
     let map_for_hover = map.clone();
     factory.connect_setup(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -287,7 +298,6 @@ pub(super) fn column_rows(
         selection_click.set_propagation_phase(gtk::PropagationPhase::Capture);
         let clicked_item = item.downgrade();
         let selection_for_click = selection_for_rows.clone();
-        let selection_anchor_for_click = mouse_selection_anchor.clone();
         let modified_for_click = modified_selection_for_rows.clone();
         let map_for_click = map_for_hover.clone();
         // Open on release so a press-and-move can start a drag first.
@@ -316,28 +326,31 @@ pub(super) fn column_rows(
                 );
             modified_for_click.set(control || shift);
             if shift {
-                let anchor = selection_anchor_for_click.get().unwrap_or(position);
+                let anchor =
+                    anchored_row(&weak_state_for_click, depth, &map_for_click).unwrap_or(position);
                 let start = anchor.min(position);
                 let count = anchor.max(position).saturating_sub(start) + 1;
                 selection_for_click.select_range(start, count, true);
             } else if control {
-                selection_anchor_for_click.set(Some(position));
+                anchor_at(&weak_state_for_click, depth, &map_for_click, position);
                 if selection_for_click.is_selected(position) {
                     selection_for_click.unselect_item(position);
                 } else {
                     selection_for_click.select_item(position, false);
                 }
             } else {
-                selection_anchor_for_click.set(Some(position));
+                anchor_at(&weak_state_for_click, depth, &map_for_click, position);
                 if !preserve_group {
                     selection_for_click.select_item(position, true);
                 }
             }
             if (control || shift)
-                && gesture
-                    .widget()
-                    .is_some_and(|widget| crate::ui::pointer::hits_item_content(&widget, x, y))
+                && let Some(widget) = gesture.widget()
+                && crate::ui::pointer::hits_item_content(&widget, x, y)
             {
+                if let Some(item_widget) = widget.parent() {
+                    item_widget.grab_focus();
+                }
                 gesture.set_state(gtk::EventSequenceState::Claimed);
             }
             modified_for_click.set(false);
