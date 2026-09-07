@@ -31,7 +31,40 @@ pub(super) fn theme_page(manager: Rc<ThemeManager>) -> (gtk::Widget, Vec<(gtk::F
     let follow = append_follow_omarchy_option(&content, &manager);
     append_text_size_option(&content, &manager);
 
-    append_heading(&content, "THEMES");
+    let catalog = append_theme_catalog(&content);
+    append_heading(&content, "YOUR THEMES");
+    let custom = theme_grid();
+    content.append(&custom);
+    bind_catalog_filter(
+        fill_theme_grids(&catalog.packaged, &custom, &manager),
+        catalog.search,
+        catalog.clear,
+        catalog.appearance_buttons,
+    );
+    let editor_fields = append_custom_theme_editor(&content, &custom, &manager);
+
+    let scroller = scrollable_page(&content, None);
+    bind_switch(
+        &manager,
+        &follow,
+        ThemeManager::follows_omarchy,
+        ThemeManager::set_follow_omarchy,
+    );
+    (
+        scroller,
+        vec![(catalog.packaged, 3), (custom, 3), (editor_fields, 4)],
+    )
+}
+
+struct ThemeCatalog {
+    packaged: gtk::FlowBox,
+    search: gtk::Entry,
+    clear: gtk::Button,
+    appearance_buttons: Vec<gtk::ToggleButton>,
+}
+
+fn append_theme_catalog(content: &gtk::Box) -> ThemeCatalog {
+    append_heading(content, "THEMES");
     let packaged = theme_grid();
     let (search_overlay, theme_search, clear_search) = theme_search_overlay();
     content.append(&search_overlay);
@@ -56,49 +89,47 @@ pub(super) fn theme_page(manager: Rc<ThemeManager>) -> (gtk::Widget, Vec<(gtk::F
     catalog_container.add_css_class("theme-catalog-container");
     catalog_container.append(&catalog_scroll);
     content.append(&catalog_container);
+    ThemeCatalog {
+        packaged,
+        search: theme_search,
+        clear: clear_search,
+        appearance_buttons,
+    }
+}
 
-    append_heading(&content, "YOUR THEMES");
-    let custom = theme_grid();
-    content.append(&custom);
-
+fn fill_theme_grids(
+    packaged: &gtk::FlowBox,
+    custom: &gtk::FlowBox,
+    manager: &Rc<ThemeManager>,
+) -> Vec<(gtk::FlowBoxChild, String, bool)> {
     let mut catalog_cards = Vec::new();
     for theme in manager.themes() {
         let custom_theme = theme.custom;
         let name = theme.tokens.name.clone();
         let light = theme_is_light(&theme.tokens);
-        let flow = if custom_theme { &custom } else { &packaged };
-        let child = append_theme_card(flow, theme, &manager);
+        let flow = if custom_theme { custom } else { packaged };
+        let child = append_theme_card(flow, theme, manager);
         if !custom_theme {
             catalog_cards.push((child, name, light));
         }
     }
-    bind_catalog_filter(
-        catalog_cards,
-        theme_search.clone(),
-        clear_search,
-        appearance_buttons,
-    );
+    catalog_cards
+}
 
+fn append_custom_theme_editor(
+    content: &gtk::Box,
+    custom: &gtk::FlowBox,
+    manager: &Rc<ThemeManager>,
+) -> gtk::FlowBox {
     let add = add_theme_card_button();
     custom.insert(&add, -1);
-    bind_new_custom_themes(&custom, &manager);
+    bind_new_custom_themes(custom, manager);
     let (editor, editor_fields) = theme_editor(manager.clone());
     editor.set_reveal_child(false);
     content.append(&editor);
     let shown_editor = editor.clone();
     add.connect_clicked(move |_| shown_editor.set_reveal_child(true));
-
-    let scroller = scrollable_page(&content, None);
-    bind_switch(
-        &manager,
-        &follow,
-        ThemeManager::follows_omarchy,
-        ThemeManager::set_follow_omarchy,
-    );
-    (
-        scroller,
-        vec![(packaged, 3), (custom, 3), (editor_fields, 4)],
-    )
+    editor_fields
 }
 
 fn append_follow_omarchy_option(content: &gtk::Box, manager: &ThemeManager) -> gtk::Switch {
@@ -433,7 +464,13 @@ fn theme_preview(tokens: &ThemeTokens) -> gtk::DrawingArea {
                 1.0,
             );
         };
-        context.rounded_rectangle(0.0, 0.0, f64::from(width), f64::from(height), 6.0);
+        context.rounded_rectangle(RoundedRect {
+            x: 0.0,
+            y: 0.0,
+            width: f64::from(width),
+            height: f64::from(height),
+            radius: 6.0,
+        });
         context.clip();
         paint(context, &tokens.background);
         context.rectangle(0.0, 0.0, f64::from(width), f64::from(height));
@@ -450,19 +487,38 @@ fn theme_preview(tokens: &ThemeTokens) -> gtk::DrawingArea {
             (f64::from(width) * 0.45, 51.0, 66.0, &tokens.dim_text),
         ] {
             paint(context, value);
-            context.rounded_rectangle(x, y, w, 5.0, 2.5);
+            context.rounded_rectangle(RoundedRect {
+                x,
+                y,
+                width: w,
+                height: 5.0,
+                radius: 2.5,
+            });
             let _ = context.fill();
         }
     });
     area
 }
 
+struct RoundedRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    radius: f64,
+}
+
 trait RoundedRectangle {
-    fn rounded_rectangle(&self, x: f64, y: f64, width: f64, height: f64, radius: f64);
+    fn rounded_rectangle(&self, rect: RoundedRect);
 }
 impl RoundedRectangle for gtk::cairo::Context {
-    fn rounded_rectangle(&self, x: f64, y: f64, width: f64, height: f64, radius: f64) {
+    fn rounded_rectangle(&self, rect: RoundedRect) {
         let degrees = std::f64::consts::PI / 180.0;
+        let x = rect.x;
+        let y = rect.y;
+        let width = rect.width;
+        let height = rect.height;
+        let radius = rect.radius;
         self.new_sub_path();
         self.arc(x + width - radius, y + radius, radius, -90.0 * degrees, 0.0);
         self.arc(
