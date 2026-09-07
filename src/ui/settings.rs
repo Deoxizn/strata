@@ -2023,6 +2023,19 @@ fn launch_omarchy_update() -> Result<(), String> {
         .map_err(|error| terminal::launch_failure(&error))
 }
 
+fn or_unknown(value: Option<String>) -> String {
+    value.unwrap_or_else(|| "Unknown".to_owned())
+}
+
+fn release_detail_rows(release: &ReleaseMetadata) -> [(&'static str, String); 4] {
+    [
+        ("Channel", release.kind.label().to_owned()),
+        ("Tag", release.tag.clone()),
+        ("Commit", or_unknown(release.commit.clone())),
+        ("Published", or_unknown(release.published_at.clone())),
+    ]
+}
+
 /// Renders `release`'s channel, tag, source commit, and publication date as
 /// a small identity block, for the dialog to show above the notes whenever
 /// it is offering a prerelease -- the issue requires the user be able to
@@ -2030,24 +2043,7 @@ fn launch_omarchy_update() -> Result<(), String> {
 fn update_dialog_details(release: &ReleaseMetadata) -> gtk::Box {
     let details = gtk::Box::new(gtk::Orientation::Vertical, 2);
     details.add_css_class("update-dialog-details");
-    for (label, value) in [
-        ("Channel", release.kind.label().to_owned()),
-        ("Tag", release.tag.clone()),
-        (
-            "Commit",
-            release
-                .commit
-                .clone()
-                .unwrap_or_else(|| "Unknown".to_owned()),
-        ),
-        (
-            "Published",
-            release
-                .published_at
-                .clone()
-                .unwrap_or_else(|| "Unknown".to_owned()),
-        ),
-    ] {
+    for (label, value) in release_detail_rows(release) {
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         row.add_css_class("update-dialog-detail-row");
         let label_widget = gtk::Label::new(Some(label));
