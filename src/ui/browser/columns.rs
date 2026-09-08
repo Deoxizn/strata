@@ -68,6 +68,7 @@ pub(super) struct ColumnView {
     pub(super) map: ViewMap,
     pub(super) model_generation: Rc<Cell<u64>>,
     pub(super) header_actions: gtk::Box,
+    pub(super) header_actions_stack: gtk::Stack,
     pub(super) filter_entry: gtk::Entry,
     pub(super) filter_button: gtk::ToggleButton,
     pub(super) selection: gtk::MultiSelection,
@@ -580,7 +581,14 @@ impl ViewState {
             });
             header_actions.append(&close);
         }
-        header.append(&header_actions);
+        // Homogeneous pages keep column geometry stable as the action target changes.
+        let header_actions_stack = gtk::Stack::new();
+        header_actions_stack.add_named(&header_actions, Some("actions"));
+        header_actions_stack.add_named(
+            &gtk::Box::new(gtk::Orientation::Horizontal, 0),
+            Some("hidden"),
+        );
+        header.append(&header_actions_stack);
         column.append(&header);
         column.append(&filter_revealer);
 
@@ -951,7 +959,12 @@ impl ViewState {
         let focus = gtk::EventControllerFocus::new();
         let weak = Rc::downgrade(self);
         focus.connect_enter(move |_| {
-            if let Some(state) = weak.upgrade() {
+            if let Some(state) = weak.upgrade()
+                && state
+                    .context_menu_column
+                    .get()
+                    .is_none_or(|owner| owner == depth)
+            {
                 state.browser.set_active_column(depth);
                 state.refresh_destination_style();
             }
@@ -1102,6 +1115,7 @@ impl ViewState {
             map,
             model_generation: self.source_generation.clone(),
             header_actions,
+            header_actions_stack,
             filter_entry,
             filter_button,
             selection,
@@ -1236,6 +1250,13 @@ impl ViewState {
         self.close_peek_visual();
         if self.hovered_column.get().is_some_and(|depth| depth >= len) {
             self.hovered_column.set(None);
+        }
+        if self
+            .context_menu_column
+            .get()
+            .is_some_and(|depth| depth >= len)
+        {
+            self.context_menu_column.set(None);
         }
         self.cancel_rename();
         self.cancel_new_entry();

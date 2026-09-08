@@ -122,6 +122,30 @@ Deleting Trash streams its own batches, independently of any incomplete measurem
 and GIO URI conversion lives in `adapters/gio_location.rs`, shared by files, operations, preview and
 browser presentation. It preserves native bytes and sanitizes credentials on inbound GIO locations.
 
+Local archive operations live under `adapters/local_operations/archive/`:
+
+| Responsibility | Owner |
+| --- | --- |
+| Operation entry points, worker lifecycle and progress events | `archive.rs` in the parent directory |
+| Staged publication, source traversal and compression writers | `compression.rs` |
+| Per-operation extraction state, copying, cleanup and outcomes | `extraction.rs` |
+| Confined destination writes, path validation and conflict naming | `destination.rs` |
+| ZIP, TAR/gzip and 7z member enumeration, passwords and decoder errors | `decoders.rs` |
+
+Every decoder feeds one `ExtractionSession` per operation. The session has no codec or widget
+API dependencies; decoders lend it member streams and provide already-known pending names on
+cancellation. Member identity tracking stays inside each decoder rather than assuming unique names
+or matching header/callback order. The session validates pending names and applies established
+root renames without filesystem probes or name reservations; final leaf conflicts remain unknown
+until a member is attempted. Sequential formats do not scan unread content to complete that list.
+
+The private member boundary currently retains legacy lossy TAR-name conversion and regular-file
+output for non-directory entries, including links. It is not a complete archive-entry model;
+native names and entry-type semantics belong in the decoder compatibility evaluation. Format
+libraries and compression behavior remain unchanged. Archive unit tests sit in each module's
+adjacent `tests.rs`; provider-level tests remain in `archive/tests.rs`, with shared test-only builders
+in `fixtures.rs`.
+
 Feature unit tests sit beside their implementations. Cross-feature browser tests remain in
 `ui/browser/tests/`; GTK tests that need independent initialization can use
 `test_support::gtk_test`, which launches a subprocess with disposable XDG directories. Set
@@ -134,6 +158,42 @@ application/adapter boundaries in focused follow-ups. Likewise, alternate render
 publication/metadata orchestration, native transfer security and the settings workspace should be
 refactored independently of browser composition. Investigation and scope decisions are recorded in
 [issue #397](https://github.com/lgse/strata/issues/397).
+
+### Window composition
+
+`ui/window.rs::present_target` owns the startup sequence: prepare theme/styles, compose
+and bind the window, arm first-paint work and destruction cleanup, present, then schedule
+initial navigation, portal integration, and the due update check. Reveal selection is
+queued before navigation. Sidebar discovery remains deferred until after the first paint.
+
+`ui/window/composition.rs` coordinates the window's components. Its private `layout`
+module assembles the header, sidebar/browser/preview splits, and live shortcut footer;
+`input` installs pointer history and edit-cancellation gestures. `search` shares one
+toggle/dismissal path between the header button and window action, reading preferences
+at dispatch. `settings` owns update notices and a single lazily created Settings layer
+per window; both Settings entry points reuse it and the process-wide install guard.
+Preferences take effect before Settings opens. Destruction disconnects the clipboard
+subscription, browser observers, and sidebar monitors.
+
+`ui/window/sidebar.rs` assembles the sidebar shell and connects its preferences,
+browser events, and device monitors. Shared place-row bindings retain explicit direct
+versus validated navigation; file drops still exclude virtual locations. Typed device
+signals share a weak rebuild callback and retain their disconnect handles. Standard,
+pinned, and device rows are separate rendering stages, with the chooser's local-only
+filter preserved. Initial construction builds static places; device rows retain their
+existing deferred rebuild timing. Bookmark storage, Trash, and media-release policies
+remain in `window.rs` rather than changing alongside assembly.
+
+### Window keyboard routing
+
+`ui/window/keyboard.rs` owns the window's capture-phase keyboard dispatcher. Its ordered
+stages preserve shortcut precedence: modal and editing ownership, window/file commands,
+focus traversal, transient dismissal, then item/directory navigation. The private
+`commands.rs`, `focus.rs`, and `items.rs` modules implement those responsibilities without
+introducing another browser controller. A stage returning `None` continues through Strata's
+handlers; `Some(Propagation::Proceed)` ends dispatch and leaves the event to GTK. In
+particular, editable controls and native single-pane selection must not fall through to
+browser commands. The file chooser retains its separate, restricted keyboard policy.
 
 ## Capability boundaries
 

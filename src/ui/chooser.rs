@@ -1279,6 +1279,14 @@ fn install_shortcuts(
         let alt = modifiers.contains(gtk::gdk::ModifierType::ALT_MASK);
         let shift = modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK);
         let focused = gtk::prelude::RootExt::focus(&state.window);
+        let original_key = key;
+        let key = super::focus_navigation::navigation_key(
+            key,
+            modifiers,
+            ThemeManager::shared().type_to_search(),
+            focused.as_ref(),
+        );
+        let vim_navigation = key != original_key;
         if !focused
             .as_ref()
             .is_some_and(super::focus_navigation::in_popover)
@@ -1364,6 +1372,18 @@ fn install_shortcuts(
         }
         if state.view.new_entry_is_active() || state.view.rename_is_active() {
             return glib::Propagation::Proceed;
+        }
+        if key == gtk::gdk::Key::space
+            && !modifiers.intersects(
+                gtk::gdk::ModifierType::CONTROL_MASK
+                    | gtk::gdk::ModifierType::ALT_MASK
+                    | gtk::gdk::ModifierType::SUPER_MASK
+                    | gtk::gdk::ModifierType::SHIFT_MASK,
+            )
+            && let Some(entry) = state.view.selected_search_result()
+        {
+            preview.toggle(preview_target(Some(entry)));
+            return glib::Propagation::Stop;
         }
         if control
             && !shift
@@ -1613,6 +1633,10 @@ fn install_shortcuts(
                 }
                 state.view.synchronize_native_selection(extend);
             });
+            if vim_navigation {
+                super::focus_navigation::activate_native_arrow(&state.window, key);
+                return glib::Propagation::Stop;
+            }
             return glib::Propagation::Proceed;
         }
         if shift

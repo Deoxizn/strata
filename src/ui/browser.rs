@@ -52,7 +52,7 @@ pub(crate) use crate::ui::browser::collection::{
     activate_recursive_search_result, debounce_filter_entry, detach_collection_view,
     focus_collection_item_when_allocated, focus_filter_entry, notify_filter_query,
     prepare_collection_inline_edit, recursive_search_activation_key,
-    scroll_collection_when_allocated, search_result_navigation_position,
+    scroll_collection_when_allocated, search_result_entry, search_result_navigation_position,
 };
 pub(super) use crate::ui::browser::columns::max_child_natural_width;
 pub(super) use crate::ui::browser::context_menu::{
@@ -137,6 +137,8 @@ pub(super) struct ViewState {
     mode_views: RefCell<ModeViews>,
     columns: RefCell<Vec<ColumnView>>,
     hovered_column: Cell<Option<usize>>,
+    context_menu_column: Cell<Option<usize>>,
+    context_menu_generation: Cell<u64>,
     input_ownership: RefCell<super::input_ownership::InputOwnership>,
     horizontal_scroll_generation: Rc<Cell<u64>>,
     source_generation: Rc<Cell<u64>>,
@@ -320,6 +322,8 @@ impl BrowserView {
             mode_views: RefCell::new(mode_views),
             columns: RefCell::new(Vec::new()),
             hovered_column: Cell::new(None),
+            context_menu_column: Cell::new(None),
+            context_menu_generation: Cell::new(0),
             input_ownership: RefCell::new(super::input_ownership::InputOwnership::default()),
             horizontal_scroll_generation: Rc::new(Cell::new(0)),
             source_generation,
@@ -732,7 +736,11 @@ impl BrowserView {
         let Some(column) = adjacent.and_then(|index| columns.get(index)) else {
             return false;
         };
+        column
+            .header_actions_stack
+            .set_visible_child_name("actions");
         let moved = focus_header_action(&column.header_actions, direction);
+        self.state.refresh_destination_style();
         if moved && let Some(window) = self.state.overlay.root().and_downcast::<gtk::Window>() {
             window.set_focus_visible(true);
         }
@@ -1077,12 +1085,9 @@ impl BrowserView {
         if self.view_mode() != BrowserMode::Columns {
             return self.state.mode_views.borrow().show_filter_with_query(query);
         }
-        let depth = self
-            .state
-            .focused_column_depth()
-            .or_else(|| self.state.browser.active_depth());
-        let columns = self.state.columns.borrow();
-        let Some(column) = depth.and_then(|depth| columns.get(depth)) else {
+        let depth = self.state.destination_depth();
+        let column = depth.and_then(|depth| self.state.columns.borrow().get(depth).cloned());
+        let Some(column) = column else {
             return false;
         };
         column.filter_button.set_active(true);
@@ -1100,6 +1105,34 @@ impl BrowserView {
                             || focused.is_ancestor(&column.filter_entry)
                     })
             })
+    }
+
+    /// Recursive results have their own selection, independent of the directory's selection.
+    pub fn selected_search_result(&self) -> Option<FileEntry> {
+        if self.view_mode() != BrowserMode::Columns {
+            return self.state.mode_views.borrow().selected_search_result();
+        }
+        let focused = self.state.overlay.root()?.focus()?;
+        self.state.columns.borrow().iter().find_map(|column| {
+            if column.search_handle.borrow().is_none()
+                || !(focused.is_ancestor(&column.filter_entry)
+                    || focused == column.filter_entry.clone().upcast::<gtk::Widget>()
+                    || focused.is_ancestor(&column.list)
+                    || focused == column.list.clone().upcast::<gtk::Widget>())
+            {
+                return None;
+            }
+            let selected = column.selection.selection();
+            if selected.is_empty() {
+                return None;
+            }
+            let position = selected.maximum();
+            column
+                .search_results
+                .borrow()
+                .get(position as usize)
+                .map(search_result_entry)
+        })
     }
 
     pub fn item_view_has_focus(&self) -> bool {
@@ -1342,6 +1375,11 @@ impl ViewState {
         if self.mode_views.borrow().mode() != BrowserMode::Columns {
             return self.browser.active_depth();
         }
+        if let Some(depth) = self.context_menu_column.get()
+            && depth < self.columns.borrow().len()
+        {
+            return Some(depth);
+        }
         self.input_ownership.borrow().destination(
             self.hovered_column.get(),
             self.focused_column_depth(),
@@ -1354,13 +1392,33 @@ impl ViewState {
         let destination = self.destination_depth();
         let pointer = self.input_ownership.borrow().last_navigation
             == super::input_ownership::NavigationInput::Pointer
-            && self.hovered_column.get() == destination;
+            && (self.hovered_column.get() == destination
+                || self.context_menu_column.get().is_some());
         let focused_column = self.focused_column_depth();
         let focused_item = self
             .browser
             .focused_item()
             .map(|(depth, position, _)| (depth, position));
         for (depth, column) in self.columns.borrow().iter().enumerate() {
+            let show_actions = destination == Some(depth);
+            if !show_actions
+                && self
+                    .overlay
+                    .root()
+                    .and_then(|root| root.focus())
+                    .is_some_and(|focused| {
+                        focused == *column.header_actions.upcast_ref::<gtk::Widget>()
+                            || focused.is_ancestor(&column.header_actions)
+                    })
+            {
+                // Do not leave keyboard focus inside controls hidden by pointer navigation.
+                if !column.list.grab_focus() {
+                    column.presentation.stack.grab_focus();
+                }
+            }
+            column
+                .header_actions_stack
+                .set_visible_child_name(if show_actions { "actions" } else { "hidden" });
             let cursor = focused_item
                 .filter(|(item_depth, _)| *item_depth == depth)
                 .filter(|_| focused_column == Some(depth))
