@@ -224,6 +224,7 @@ struct Pane {
     /// Set while a reload has detached the pane's models from their views.
     detached: Rc<Cell<bool>>,
     stack: gtk::Stack,
+    loading: super::loading_skeleton::DelayedLoading,
     status: gtk::Label,
     spinner: gtk::Spinner,
     truncated_hint: gtk::Image,
@@ -573,7 +574,7 @@ impl ModeViews {
         };
         entry_kind.set(is_directory);
         placeholder.splice(0, placeholder.n_items(), &[""]);
-        pane.stack.set_visible_child_name("content");
+        pane.loading.show("content");
         let bound_items = pane.section.bound_items.clone();
         let active = self.active_new_entry.clone();
         let placeholder = placeholder.clone();
@@ -1002,7 +1003,7 @@ impl ModeViews {
                     pane.truncated_hint.set_visible(false);
                     pane.spinner.set_visible(true);
                     pane.spinner.start();
-                    pane.stack.set_visible_child_name("loading");
+                    pane.loading.start();
                 }
             }
             BrowserEvent::LoadFinished { depth, truncated } => {
@@ -1021,7 +1022,7 @@ impl ModeViews {
                     pane.status
                         .set_label(&format!("Unable to read this directory\n{message}"));
                     pane.status.add_css_class("error");
-                    pane.stack.set_visible_child_name("status");
+                    pane.loading.show("status");
                 }
             }
             BrowserEvent::SelectionSetChanged {
@@ -1943,6 +1944,7 @@ fn build_icons_pane(
         icons: Some(context),
         targets,
         detached: Rc::new(Cell::new(false)),
+        loading: super::loading_skeleton::DelayedLoading::new(&stack),
         stack,
         status,
         spinner,
@@ -2915,6 +2917,7 @@ fn build_list_pane(
         icons: None,
         targets,
         detached: Rc::new(Cell::new(false)),
+        loading: super::loading_skeleton::DelayedLoading::new(&stack),
         stack,
         status,
         spinner,
@@ -3078,7 +3081,6 @@ fn pane_base(
     stack.add_named(&content, Some("content"));
     stack.add_named(loading, Some("loading"));
     stack.add_named(&status, Some("status"));
-    stack.set_visible_child_name("loading");
     shell.append(&stack);
 
     let model = gtk::StringList::new(&[]);
@@ -3820,9 +3822,9 @@ fn show_count(pane: &Pane) {
     if count == 0 {
         pane.status.remove_css_class("error");
         pane.status.set_label("This directory is empty");
-        pane.stack.set_visible_child_name("status");
+        pane.loading.show("status");
     } else {
-        pane.stack.set_visible_child_name("content");
+        pane.loading.show("content");
     }
     if let Some(button) = &pane.empty_trash_button {
         button.set_sensitive(count > 0);
@@ -3838,14 +3840,14 @@ fn apply_snapshot(pane: &Pane, snapshot: &BrowserColumnSnapshot, browser: &Brows
     pane.truncated_hint.set_visible(snapshot.truncated);
     if snapshot.loading {
         pane.spinner.start();
-        pane.stack.set_visible_child_name("loading");
+        pane.loading.start();
     } else {
         pane.spinner.stop();
         if let Some(message) = snapshot.error.as_deref() {
             pane.status
                 .set_label(&format!("Unable to read this directory\n{message}"));
             pane.status.add_css_class("error");
-            pane.stack.set_visible_child_name("status");
+            pane.loading.show("status");
         }
     }
 }
