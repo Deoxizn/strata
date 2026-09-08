@@ -83,6 +83,7 @@ pub struct CreateFileRequest {
     pub id: OperationRequestId,
     pub parent: Location,
     pub name: String,
+    pub unique_name: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -185,7 +186,7 @@ pub enum OperationEvent {
     Created {
         request_id: OperationRequestId,
     },
-    DirectoryCreated {
+    EntryCreated {
         request_id: OperationRequestId,
         location: Location,
     },

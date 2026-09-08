@@ -34,28 +34,33 @@ Background selection updates from directory loading must not move keyboard focus
 ## Creating files and folders
 
 In Columns, List, and Icons, **Ctrl+Shift+N** or background menu → **New Folder**
-immediately creates `new folder`. If that name is occupied by any item, it tries
-`new folder (1)`, `new folder (2)`, and so on without overwriting anything.
-The pane filter is cleared and the entire folder name is selected for renaming:
-one Backspace clears it, and typing replaces it.
+immediately creates `new folder`. Background menu → **New File** immediately
+creates an empty `new file`. If the default name is occupied by any item, creation
+tries `new folder (1)` / `new file (1)`, then `(2)`, and so on without overwriting
+anything. The pane filter is cleared and the entire allocated default name is
+selected: one Backspace clears it, and typing replaces it.
 
-For **any folder rename**, including that new folder, Enter, clicking outside
-the field (even empty pane space), or moving keyboard focus away commits a valid
-name. Escape keeps the original name. Finishing with an empty or invalid name
-also keeps the original. Cancelling the initial rename does **not** delete the
-new folder: it remains under its allocated default name. Clicking inside the
-field continues editing; folder names containing dots are selected in full.
+For **any file or folder rename**, Enter, clicking outside the field (even empty
+pane space), or moving keyboard focus away commits a valid name. Escape keeps
+the original name. Finishing with an empty or invalid name also keeps the
+original. Cancelling the initial rename does **not** delete the new item: it
+remains under its allocated default name. File contents are preserved.
 
-**New File** still requires Enter with a valid name before creating anything.
-Escape, outside clicks, or focus loss cancel it; empty/whitespace-only Enter
-also cancels, while other invalid names remain editable. Existing file-rename
-behavior, including extension-aware selection, is unchanged.
+Clicking inside the field continues editing. Existing files retain extension-aware
+selection (the stem is selected); folder names containing dots are selected in full.
 
 Names containing `/` or NUL, `.`/`..`, and whitespace-only names (including
 Unicode whitespace) are invalid. Valid names are used exactly as typed,
 including spaces around a nonblank name, hidden-file prefixes, and Unicode.
 Name conflicts, filesystem-specific limits, and permission errors retain the
 original item and report an error.
+
+Click-away results: Columns ([file](screenshots/566/columns-new-file-rename.png),
+[folder](screenshots/566/columns-new-folder-rename.png)),
+List ([file](screenshots/566/list-new-file-rename.png),
+[folder](screenshots/566/list-new-folder-rename.png)), and
+Icons ([file](screenshots/566/icons-new-file-rename.png),
+[folder](screenshots/566/icons-new-folder-rename.png)).
 
 ## Shortcut footer
 

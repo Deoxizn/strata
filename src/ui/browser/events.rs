@@ -31,12 +31,12 @@ impl ViewState {
     pub(super) fn handle(self: &Rc<Self>, event: &BrowserEvent) {
         match event {
             BrowserEvent::Reset => {
-                self.pending_folder_rename.take();
+                self.pending_new_entry.take();
                 self.pending_location_credentials.take();
                 self.truncate(0);
             }
             BrowserEvent::ColumnsTruncated { len } => {
-                self.pending_folder_rename.take();
+                self.pending_new_entry.take();
                 self.truncate(*len);
                 self.sync_active_location();
             }
@@ -358,11 +358,9 @@ impl ViewState {
                     set_column_selections(column, &filtered_positions);
                     // A background batch delivered for a column that already has a
                     // selection re-fires this event; don't let it steal focus from
-                    // an in-progress New Folder/File prompt or rename (visible for
-                    // slow network directories that stream many batches).
-                    if self.active_rename.borrow().is_none()
-                        && self.active_new_entry.borrow().is_none()
-                    {
+                    // an in-progress rename (visible for slow network directories
+                    // that stream many batches). A pending creation still needs to scroll.
+                    if self.active_rename.borrow().is_none() {
                         if (*take_focus || self.focused_column_depth() == Some(*depth))
                             && let Some(focused) = column.map.view_position(*focused)
                         {
@@ -376,8 +374,7 @@ impl ViewState {
             }
             BrowserEvent::FocusChanged { depth, position } => {
                 if let Some(column) = self.columns.borrow().get(*depth) {
-                    let editing = self.active_rename.borrow().is_some()
-                        || self.active_new_entry.borrow().is_some();
+                    let editing = self.active_rename.borrow().is_some();
                     if let Some(filtered_position) =
                         position.and_then(|position| column.map.view_position(position))
                     {
@@ -406,45 +403,12 @@ impl ViewState {
                     open_location(location, &self.overlay);
                 }
             }
-            BrowserEvent::DirectoryCreated { location } => {
-                self.rename_created_folder(location);
+            BrowserEvent::EntryCreated { location } => {
+                self.rename_created_entry(location);
             }
-            BrowserEvent::RenameCompleted => {
-                let submitting = self
-                    .active_rename
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|active| !active.field.is_sensitive())
-                    || self
-                        .mode_views
-                        .borrow()
-                        .active_rename_target()
-                        .is_some_and(|(field, _)| !field.is_sensitive());
-                if submitting {
-                    self.cancel_rename();
-                    self.browser.focus_active();
-                }
-            }
+            BrowserEvent::RenameCompleted => {}
             BrowserEvent::RenameFailed { message } => {
-                let field = self
-                    .active_rename
-                    .borrow()
-                    .as_ref()
-                    .filter(|active| !active.field.is_sensitive())
-                    .map(|active| active.field.clone());
-                if let Some(field) = field {
-                    field.set_sensitive(true);
-                    field.add_css_class("error");
-                    field.set_tooltip_text(Some(message));
-                    field.grab_focus();
-                } else if !self
-                    .mode_views
-                    .borrow()
-                    .active_rename_target()
-                    .is_some_and(|(field, _)| !field.is_sensitive())
-                {
-                    show_error_dialog(&self.overlay, "Unable to rename folder", message);
-                }
+                show_error_dialog(&self.overlay, "Unable to rename item", message);
             }
             BrowserEvent::TransferStarted { total, moving } => {
                 let browser = self.browser.clone();
@@ -507,7 +471,7 @@ impl ViewState {
             }
             BrowserEvent::RestorationFinished => self.dismiss_file_operation_progress(),
             BrowserEvent::OperationFailed { message } => {
-                self.pending_folder_rename.take();
+                self.pending_new_entry.take();
                 self.dismiss_file_operation_progress();
                 let retry = self.pending_extract_retry.take();
                 if let Some((entry, dest)) = retry {

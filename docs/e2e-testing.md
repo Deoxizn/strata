@@ -173,24 +173,26 @@ def test_something(strata):
 
 ### Inline new-entry focus regressions
 
-`test_folder_renaming.py` checks immediate default-folder creation, collision
-numbering, whole-name selection, valid-name commits on click-away, and retaining
+`test_inline_renaming.py` checks immediate default-file/folder creation, collision
+numbering, selected default names, valid-name commits on click-away, and retaining
 the original name on Escape or invalid input. It exercises existing and newly
-created folders in all three views, including repeated dotted-name renames.
-`test_entry_management.py` also covers New File cancellation, invalid-name
-correction, inside-field clicks, existing-name protection, and empty directories.
+created items in all three views, verifies file contents, and covers repeated
+renames with folder-wide or file-stem selection. `test_entry_management.py` also
+covers reopening invalid edits, inside-field clicks, name conflicts, and empty
+directories.
 
 ```bash
-./scripts/e2e.sh tests/e2e/scenarios/test_folder_renaming.py tests/e2e/scenarios/test_entry_management.py
+./scripts/e2e.sh tests/e2e/scenarios/test_inline_renaming.py tests/e2e/scenarios/test_entry_management.py
 ```
 
 Keep these as real XTEST pointer interactions: emitting a focus controller's
 `leave` signal in a Rust test checks the handler, not GTK's in-flight focus walk
-(#566). Folder rename dispatch and List/Icons New File placeholder removal must
-wait until that walk returns. The
-cleanup identifies the original placeholder item, not the recyclable Entry
-widget, and reads the current listing before restoring the empty state. Rust
-unit tests cover these deferred-cleanup races separately.
+(#566). Rename dispatch must wait until that walk returns because an operation
+can refresh the row model. Creation now uses real entries rather than temporary
+placeholder rows; the same rename path handles new and existing items. Rust
+tests cover atomic naming collisions, Unicode validation, editor lifetimes,
+cancellation/navigation before the created entry becomes visible, and scrolling
+to new entries beyond the initial viewport in large directories.
 
 ### Accessible names are product surface
 

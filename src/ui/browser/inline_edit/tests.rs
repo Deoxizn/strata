@@ -10,7 +10,7 @@ use crate::{
 };
 use std::time::{Duration, Instant};
 
-mod folders;
+mod entries;
 
 #[test]
 fn an_empty_name_is_not_flagged_as_an_error() {
@@ -65,91 +65,6 @@ fn icon_card_bounds(root: &gtk::Widget) -> Vec<(i32, i32, i32, i32)> {
 }
 
 #[test]
-fn new_files_require_enter_and_a_nonblank_name_in_every_mode() {
-    gtk_test(
-        "ui::browser::inline_edit::tests::new_files_require_enter_and_a_nonblank_name_in_every_mode",
-        || {
-            for mode in [BrowserMode::Columns, BrowserMode::List, BrowserMode::Icons] {
-                for (name, enter) in [
-                    ("discarded", false),
-                    ("created", true),
-                    ("", true),
-                    (" \u{2003} ", true),
-                ] {
-                    let fixture = tempfile::tempdir().expect("directory fixture");
-                    let path = fixture.path();
-                    std::fs::write(path.join("alpha.txt"), b"alpha").expect("fixture file");
-                    let view = BrowserView::new(
-                        Rc::new(crate::adapters::LocalFileSource),
-                        PeekBehavior::default(),
-                    );
-                    view.set_operation_provider(Rc::new(crate::adapters::LocalOperationProvider));
-                    view.set_view_mode(mode);
-                    let window = gtk::Window::builder()
-                        .child(&view.widget())
-                        .default_width(800)
-                        .default_height(600)
-                        .build();
-                    window.present();
-                    let browser = view.browser();
-                    browser.navigate(Location::local(path));
-                    wait_until(|| {
-                        browser
-                            .column_snapshot(0)
-                            .is_some_and(|snapshot| !snapshot.loading)
-                    });
-                    view.state.begin_new_entry(0, Location::local(path), false);
-                    let active_field = || {
-                        if mode == BrowserMode::Columns {
-                            view.state
-                                .active_new_entry
-                                .borrow()
-                                .as_ref()
-                                .map(|active| active.field.clone())
-                        } else {
-                            view.state.mode_views.borrow().active_new_entry_field()
-                        }
-                    };
-                    wait_until(|| active_field().is_some());
-                    let field = active_field().expect("new entry field");
-                    field.set_text(name);
-                    let controllers = field.observe_controllers();
-                    let focus = (0..controllers.n_items())
-                        .find_map(|index| {
-                            controllers
-                                .item(index)
-                                .and_downcast::<gtk::EventControllerFocus>()
-                        })
-                        .expect("focus controller on the new entry field");
-                    if enter {
-                        field.emit_activate();
-                    } else {
-                        focus.emit_by_name::<()>("leave", &[]);
-                    }
-                    wait_until(|| active_field().is_none());
-                    if enter && !name.trim().is_empty() {
-                        wait_until(|| path.join(name).exists());
-                        assert!(path.join(name).is_file());
-                        wait_until(|| {
-                            browser
-                                .column_snapshot(0)
-                                .is_some_and(|snapshot| snapshot.count == 2)
-                        });
-                    } else {
-                        while glib::MainContext::default().pending() {
-                            glib::MainContext::default().iteration(false);
-                        }
-                        assert_eq!(std::fs::read_dir(path).expect("fixture listing").count(), 1);
-                    }
-                    browser.clear_observer();
-                    window.destroy();
-                }
-            }
-        },
-    );
-}
-
-#[test]
 fn columns_rename_hides_and_restores_the_size_badge() {
     gtk_test(
         "ui::browser::inline_edit::tests::columns_rename_hides_and_restores_the_size_badge",
@@ -201,9 +116,9 @@ fn columns_rename_hides_and_restores_the_size_badge() {
 }
 
 #[test]
-fn submitting_an_invalid_rename_flags_the_field_in_every_view_mode() {
+fn invalid_renames_retain_the_original_file_in_every_view_mode() {
     gtk_test(
-        "ui::browser::inline_edit::tests::submitting_an_invalid_rename_flags_the_field_in_every_view_mode",
+        "ui::browser::inline_edit::tests::invalid_renames_retain_the_original_file_in_every_view_mode",
         || {
             let fixture = tempfile::tempdir().expect("directory fixture");
             let file = fixture.path().join("notes.txt");
@@ -268,23 +183,24 @@ fn submitting_an_invalid_rename_flags_the_field_in_every_view_mode() {
                     );
                 }
 
-                for (name, message) in [
-                    ("", "Enter a name"),
-                    ("bad/name", "Names cannot contain /"),
-                    (".", "That name is reserved"),
-                ] {
+                for name in ["", "   ", "bad/name", "."] {
+                    assert!(view.state.begin_rename());
+                    let field = view
+                        .state
+                        .active_rename
+                        .borrow()
+                        .as_ref()
+                        .map(|active| active.field.clone())
+                        .or_else(|| view.state.mode_views.borrow().active_rename_field())
+                        .expect("rename field");
                     field.set_text(name);
-                    field.emit_by_name::<()>("activate", &[]);
-                    assert!(
-                        field.has_css_class("error"),
-                        "{mode:?} did not flag {name:?}"
-                    );
-                    assert_eq!(
-                        field.tooltip_text().as_deref(),
-                        Some(message),
-                        "{mode:?} explains why {name:?} was rejected"
-                    );
-                    assert!(field.is_sensitive(), "{mode:?} left the field disabled");
+                    if !name.is_empty() {
+                        assert!(field.has_css_class("error"));
+                    }
+                    field.emit_activate();
+                    assert!(!view.rename_is_active());
+                    assert!(!gtk::prelude::WidgetExt::is_visible(&field));
+                    assert_eq!(std::fs::read(&file).expect("original contents"), b"body");
                 }
 
                 assert!(file.is_file(), "{mode:?} left the entry untouched");

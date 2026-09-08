@@ -10,7 +10,7 @@ use crate::ui::browser::clipboard::{copy_locations, register_cut_view};
 use crate::ui::browser::collection::cancel_source;
 use crate::ui::browser::columns::{COLUMN_WIDTH, ColumnView};
 use crate::ui::browser::desktop::selected_terminal_location;
-use crate::ui::browser::inline_edit::{ActiveNewEntry, ActiveRename, PendingFolderRename};
+use crate::ui::browser::inline_edit::{ActiveRename, PendingEntryRename};
 use crate::ui::browser::location::{MountCredentials, is_breadcrumb_button_target};
 use crate::ui::browser::paths::{can_pin_entry, is_trash_location};
 use crate::ui::browser::peek::{PeekAnchor, PeekView};
@@ -64,7 +64,7 @@ pub(super) use crate::ui::browser::entry::{
     metadata_needs_fill, model_type_group,
 };
 pub(super) use crate::ui::browser::inline_edit::{
-    queue_folder_rename, rename_stem_end, update_basename_validation,
+    queue_rename, rename_stem_end, update_basename_validation,
 };
 pub(super) use crate::ui::browser::pane_header::{
     column_sort_direction_toggle, column_sort_menu, empty_trash_button, pane_new_folder_button,
@@ -151,8 +151,7 @@ pub(super) struct ViewState {
     interactive: bool,
     columns_click_activation: Cell<ClickActivation>,
     active_rename: RefCell<Option<ActiveRename>>,
-    active_new_entry: RefCell<Option<ActiveNewEntry>>,
-    pending_folder_rename: RefCell<Option<Rc<PendingFolderRename>>>,
+    pending_new_entry: RefCell<Option<Rc<PendingEntryRename>>>,
     file_progress_view: RefCell<Option<FileProgressView>>,
     pending_file_progress: RefCell<Option<glib::SourceId>>,
     file_operation_progress: Cell<(usize, usize)>,
@@ -335,8 +334,7 @@ impl BrowserView {
             interactive,
             columns_click_activation: Cell::new(ClickActivation::default()),
             active_rename: RefCell::new(None),
-            active_new_entry: RefCell::new(None),
-            pending_folder_rename: RefCell::new(None),
+            pending_new_entry: RefCell::new(None),
             file_progress_view: RefCell::new(None),
             pending_file_progress: RefCell::new(None),
             file_operation_progress: Cell::new((0, 0)),
@@ -497,7 +495,7 @@ impl BrowserView {
     }
 
     pub fn cancel_new_entry(&self) -> bool {
-        self.state.cancel_new_entry() || self.state.mode_views.borrow().cancel_new_entry()
+        self.state.cancel_new_entry()
     }
 
     pub fn rename_is_active(&self) -> bool {
@@ -506,9 +504,7 @@ impl BrowserView {
     }
 
     pub fn new_entry_is_active(&self) -> bool {
-        self.state.pending_folder_rename.borrow().is_some()
-            || self.state.active_new_entry.borrow().is_some()
-            || self.state.mode_views.borrow().new_entry_is_active()
+        self.state.pending_new_entry.borrow().is_some()
     }
 
     pub fn preview_occupied_width(&self) -> i32 {
@@ -1241,11 +1237,9 @@ impl ViewState {
             let Some(state) = weak_state.upgrade() else {
                 return glib::ControlFlow::Break;
             };
-            if state.pending_folder_rename.borrow().is_some()
+            if state.pending_new_entry.borrow().is_some()
                 || state.active_rename.borrow().is_some()
-                || state.active_new_entry.borrow().is_some()
                 || state.mode_views.borrow().rename_is_active()
-                || state.mode_views.borrow().new_entry_is_active()
             {
                 return glib::ControlFlow::Continue;
             }

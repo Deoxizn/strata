@@ -108,7 +108,7 @@ pub(super) fn column_rows(
             if let Some(state) = weak_state_for_leave.upgrade()
                 && let Some(field) = controller.widget().and_downcast::<gtk::Entry>()
             {
-                state.finish_folder_rename_for_field(&field);
+                state.submit_rename(&field);
             }
         });
         rename.add_controller(focus);

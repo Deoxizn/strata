@@ -184,15 +184,6 @@ struct ActiveModeRename {
     label: gtk::Widget,
 }
 
-struct ActiveModeNewEntry {
-    is_directory: bool,
-    field: gtk::Entry,
-    placeholder: Option<gtk::StringList>,
-    stack: Option<gtk::Stack>,
-    source_model: Option<gtk::StringList>,
-    view: gtk::Widget,
-}
-
 struct BoundModeItem {
     item: glib::WeakRef<gtk::ListItem>,
     widget: glib::WeakRef<gtk::Widget>,
@@ -217,7 +208,7 @@ struct Pane {
     model: gtk::StringList,
     source_index: SourceIndexMap,
     filter_model: Option<gtk::FilterListModel>,
-    /// The section that owns the pane's chrome and hosts the inline new-entry row.
+    /// The primary section that owns the pane's chrome.
     section: PaneSection,
     sections: Rc<RefCell<Vec<PaneSection>>>,
     icons: Option<Rc<IconsContext>>,
@@ -232,8 +223,6 @@ struct Pane {
     filter_entry: Option<gtk::Entry>,
     filter_button: Option<gtk::ToggleButton>,
     empty_trash_button: Option<gtk::Button>,
-    new_entry_placeholder: Option<gtk::StringList>,
-    new_entry_is_directory: Option<Rc<Cell<bool>>>,
     show_hidden: Rc<Cell<bool>>,
     filter: gtk::CustomFilter,
 }
@@ -244,7 +233,7 @@ impl Pane {
         self.sections.borrow().clone()
     }
 
-    /// Every section, including the one hosting the inline new-entry row.
+    /// Include the primary section even while the item sections are empty.
     fn all_sections(&self) -> Vec<PaneSection> {
         let mut sections = self.item_sections();
         if !sections
@@ -279,7 +268,6 @@ pub struct ModeViews {
     context_state: RefCell<Option<Weak<super::browser::ViewState>>>,
     new_folder_state: RefCell<Option<Weak<super::browser::ViewState>>>,
     active_rename: Rc<RefCell<Option<ActiveModeRename>>>,
-    active_new_entry: Rc<RefCell<Option<ActiveModeNewEntry>>>,
     mode: BrowserMode,
     density: BrowserDensity,
     group_by_type: bool,
@@ -354,7 +342,6 @@ impl ModeViews {
             context_state: RefCell::new(None),
             new_folder_state: RefCell::new(None),
             active_rename: Rc::new(RefCell::new(None)),
-            active_new_entry: Rc::new(RefCell::new(None)),
             mode: BrowserMode::Columns,
             density: BrowserDensity::Compact,
             group_by_type: false,
@@ -531,105 +518,11 @@ impl ModeViews {
         self.active_rename.borrow().is_some()
     }
 
-    #[cfg(test)]
     pub(in crate::ui) fn active_rename_field(&self) -> Option<gtk::Entry> {
         self.active_rename
             .borrow()
             .as_ref()
             .map(|rename| rename.field.clone())
-    }
-
-    pub(in crate::ui) fn active_new_entry_field(&self) -> Option<gtk::Entry> {
-        self.active_new_entry
-            .borrow()
-            .as_ref()
-            .map(|active| active.field.clone())
-    }
-
-    pub fn new_entry_is_active(&self) -> bool {
-        self.active_new_entry.borrow().is_some()
-    }
-
-    pub fn cancel_new_entry(&self) -> bool {
-        let Some(active) = self.active_new_entry.take() else {
-            return false;
-        };
-        active.field.set_text("");
-        active.field.remove_css_class("error");
-        active.field.set_tooltip_text(None);
-        finish_mode_new_entry(&active);
-        true
-    }
-
-    pub fn begin_new_entry(&self, depth: usize, is_directory: bool) -> bool {
-        self.cancel_new_entry();
-        self.cancel_rename();
-        let pane = match self.mode {
-            BrowserMode::Columns => return false,
-            BrowserMode::Icons => self.icons_panes.iter().find(|pane| pane.depth == depth),
-            BrowserMode::List => self.list_pane.as_ref().filter(|pane| pane.depth == depth),
-        };
-        let Some(pane) = pane else {
-            return false;
-        };
-        let Some(placeholder) = pane.new_entry_placeholder.as_ref() else {
-            return false;
-        };
-        let Some(entry_kind) = pane.new_entry_is_directory.as_ref() else {
-            return false;
-        };
-        entry_kind.set(is_directory);
-        placeholder.splice(0, placeholder.n_items(), &[""]);
-        pane.stack.set_visible_child_name("content");
-        let bound_items = pane.section.bound_items.clone();
-        let active = self.active_new_entry.clone();
-        let placeholder = placeholder.clone();
-        let stack = pane.stack.clone();
-        let source_model = pane.model.clone();
-        let view = pane.section.view.clone();
-        view.add_css_class("creating-entry");
-        if let Ok(icons) = view.clone().downcast::<gtk::GridView>() {
-            icons.scroll_to(0, gtk::ListScrollFlags::FOCUS, None);
-        } else if let Ok(list) = view.clone().downcast::<gtk::ListView>() {
-            list.scroll_to(0, gtk::ListScrollFlags::FOCUS, None);
-        }
-        glib::idle_add_local_once(move || {
-            // Icons cards create the field on the placeholder bind; list rows already have one.
-            let field = bound_items.borrow().iter().find_map(|bound| {
-                let item = bound.item.upgrade()?;
-                if item.position() != 0 {
-                    return None;
-                }
-                let widget = bound.widget.upgrade()?;
-                descendant_with_class(&widget, "inline-rename")?
-                    .downcast::<gtk::Entry>()
-                    .ok()
-                    .filter(gtk::prelude::WidgetExt::is_visible)
-            });
-            let Some(field) = field else {
-                placeholder.splice(0, placeholder.n_items(), &[]);
-                view.remove_css_class("creating-entry");
-                return;
-            };
-            field.set_text("");
-            active.replace(Some(ActiveModeNewEntry {
-                is_directory,
-                field: field.clone(),
-                placeholder: Some(placeholder),
-                stack: Some(stack),
-                source_model: Some(source_model),
-                view,
-            }));
-            field.grab_focus();
-        });
-        true
-    }
-
-    pub(in crate::ui) fn active_rename_target(&self) -> Option<(gtk::Entry, bool)> {
-        self.active_rename
-            .borrow()
-            .as_ref()
-            .map(|active| (active.field.clone(), active.entry.is_directory()))
     }
 
     pub(in crate::ui) fn submit_rename(&self, field: &gtk::Entry) {
@@ -805,7 +698,6 @@ impl ModeViews {
         if self.mode == mode {
             return;
         }
-        self.cancel_new_entry();
         self.cancel_rename();
         self.mode = mode;
         match mode {
@@ -890,7 +782,6 @@ impl ModeViews {
         if self.group_by_type == enabled {
             return;
         }
-        self.cancel_new_entry();
         self.cancel_rename();
         self.group_by_type = enabled;
         if self.mode.supports_type_grouping() {
@@ -899,14 +790,6 @@ impl ModeViews {
     }
 
     pub fn handle(&mut self, event: &BrowserEvent) {
-        if matches!(
-            event,
-            BrowserEvent::Reset
-                | BrowserEvent::ColumnsTruncated { .. }
-                | BrowserEvent::ColumnAdded { .. }
-        ) {
-            self.cancel_new_entry();
-        }
         match event {
             BrowserEvent::Reset => {
                 self.clear_icons();
@@ -1081,29 +964,6 @@ impl ModeViews {
                 }
                 self.focus_visible_pane(*depth);
             }
-            BrowserEvent::RenameCompleted => {
-                if self
-                    .active_rename
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|active| !active.field.is_sensitive())
-                {
-                    self.cancel_rename();
-                }
-            }
-            BrowserEvent::RenameFailed { message } => {
-                if let Some(rename) = self
-                    .active_rename
-                    .borrow()
-                    .as_ref()
-                    .filter(|active| !active.field.is_sensitive())
-                {
-                    rename.field.set_sensitive(true);
-                    rename.field.add_css_class("error");
-                    rename.field.set_tooltip_text(Some(message));
-                    rename.field.grab_focus();
-                }
-            }
             _ => {}
         }
     }
@@ -1231,7 +1091,7 @@ impl ModeViews {
     }
 
     pub fn focus_visible_pane(&self, depth: usize) {
-        if self.rename_is_active() || self.new_entry_is_active() {
+        if self.rename_is_active() {
             return;
         }
         let Some(pane) = self
@@ -1396,7 +1256,6 @@ impl ModeViews {
                 state: self.context_state.borrow().clone(),
                 new_folder_state: self.new_folder_state.borrow().clone(),
                 thumbnail_size: self.icons_thumbnail_size.clone(),
-                active_new_entry: self.active_new_entry.clone(),
                 group_by_type: false,
                 density: self.density,
             },
@@ -1431,7 +1290,6 @@ impl ModeViews {
             ListOptions {
                 state: self.context_state.borrow().clone(),
                 new_folder_state: self.new_folder_state.borrow().clone(),
-                active_new_entry: self.active_new_entry.clone(),
                 group_by_type: self.group_by_type,
             },
             depth,
@@ -1464,7 +1322,6 @@ fn pane_holds_keyboard_focus(pane: &Pane) -> bool {
 struct ListOptions {
     state: Option<Weak<super::browser::ViewState>>,
     new_folder_state: Option<Weak<super::browser::ViewState>>,
-    active_new_entry: Rc<RefCell<Option<ActiveModeNewEntry>>>,
     group_by_type: bool,
 }
 
@@ -1472,7 +1329,6 @@ struct IconsOptions {
     state: Option<Weak<super::browser::ViewState>>,
     new_folder_state: Option<Weak<super::browser::ViewState>>,
     thumbnail_size: Rc<Cell<i32>>,
-    active_new_entry: Rc<RefCell<Option<ActiveModeNewEntry>>>,
     group_by_type: bool,
     density: BrowserDensity,
 }
@@ -1504,18 +1360,11 @@ fn submit_mode_rename(
         .map(|active| active.entry.clone());
     let Some(entry) = entry else { return };
     let name = field.text().to_string();
-    if entry.is_directory() || name == entry.display_name {
-        if let Some(rename) = active.take() {
-            finish_mode_rename(rename);
-        }
-        if entry.is_directory()
-            && let Some(browser) = browser.upgrade()
-        {
-            super::browser::queue_folder_rename(&browser, entry, name);
-        }
-    } else if let Some(browser) = browser.upgrade() {
-        field.set_sensitive(false);
-        browser.rename(entry, name);
+    if let Some(rename) = active.take() {
+        finish_mode_rename(rename);
+    }
+    if let Some(browser) = browser.upgrade() {
+        super::browser::queue_rename(&browser, entry, name);
     }
 }
 
@@ -1528,6 +1377,9 @@ fn install_mode_rename_handlers(
         return;
     }
     field.add_css_class("mode-rename-wired");
+    field.connect_changed(|field| {
+        super::browser::update_basename_validation(field);
+    });
     let active = Rc::downgrade(&active);
     let submit_active = active.clone();
     let submit_browser = browser.clone();
@@ -1541,128 +1393,10 @@ fn install_mode_rename_handlers(
         if let Some(active) = active.upgrade()
             && let Some(field) = controller.widget().and_downcast::<gtk::Entry>()
         {
-            let folder = active
-                .borrow()
-                .as_ref()
-                .is_some_and(|active| active.field == field && active.entry.is_directory());
-            if folder {
-                submit_mode_rename(&active, &browser, &field);
-            }
+            submit_mode_rename(&active, &browser, &field);
         }
     });
     field.add_controller(focus);
-}
-
-fn install_icons_new_entry_handlers(
-    field: &gtk::Entry,
-    active: Rc<RefCell<Option<ActiveModeNewEntry>>>,
-    browser: Weak<Browser>,
-    location: Option<Location>,
-) {
-    if field.has_css_class("icons-new-entry-wired") {
-        return;
-    }
-    field.add_css_class("icons-new-entry-wired");
-    field.connect_changed(|field| {
-        super::browser::update_basename_validation(field);
-    });
-    let active_for_submit = active.clone();
-    let browser_for_submit = browser.clone();
-    let location_for_submit = location.clone();
-    field.connect_activate(move |field| {
-        submit_mode_new_entry(
-            &active_for_submit,
-            &browser_for_submit,
-            &location_for_submit,
-            field,
-        );
-    });
-    let focus = gtk::EventControllerFocus::new();
-    let field_for_leave = field.clone();
-    focus.connect_leave(move |_| {
-        cancel_mode_new_entry_for_field(&active, &field_for_leave);
-    });
-    field.add_controller(focus);
-}
-
-fn cancel_mode_new_entry_for_field(
-    active: &RefCell<Option<ActiveModeNewEntry>>,
-    field: &gtk::Entry,
-) {
-    let cancelled = active.borrow_mut().take_if(|active| active.field == *field);
-    if let Some(active) = cancelled {
-        finish_mode_new_entry(&active);
-    }
-}
-
-fn submit_mode_new_entry(
-    active: &RefCell<Option<ActiveModeNewEntry>>,
-    browser: &Weak<Browser>,
-    location: &Option<Location>,
-    field: &gtk::Entry,
-) {
-    if !active
-        .borrow()
-        .as_ref()
-        .is_some_and(|active| active.field == *field)
-    {
-        return;
-    }
-    let name = field.text().to_string();
-    if name.trim().is_empty() {
-        cancel_mode_new_entry_for_field(active, field);
-        return;
-    }
-    if !super::browser::update_basename_validation(field) {
-        field.grab_focus();
-        return;
-    }
-    let Some(active) = active.take() else {
-        return;
-    };
-    finish_mode_new_entry(&active);
-    if let (Some(browser), Some(location)) = (browser.upgrade(), location.clone()) {
-        if active.is_directory {
-            browser.create_directory(location, name);
-        } else {
-            browser.create_file(location, name);
-        }
-    }
-}
-
-fn finish_mode_new_entry(active: &ActiveModeNewEntry) {
-    active.field.set_text("");
-    active.field.remove_css_class("error");
-    active.field.set_tooltip_text(None);
-    active.view.remove_css_class("creating-entry");
-    let Some(placeholder) = active.placeholder.as_ref() else {
-        return;
-    };
-    // Every opening inserts a fresh StringObject, even if the factory reuses the Entry.
-    let Some(prompt) = placeholder.item(0) else {
-        return;
-    };
-    let placeholder = placeholder.clone();
-    let stack = active
-        .stack
-        .as_ref()
-        .map(gtk::prelude::ObjectExt::downgrade);
-    let source_model = active.source_model.clone();
-    // Focus-leave runs inside GTK's parent-chain walk. Keep the row parented until
-    // that walk returns; removing it here can leave GTK spinning on a freed widget.
-    glib::idle_add_local_once(move || {
-        if placeholder.item(0).as_ref() != Some(&prompt) {
-            return;
-        }
-        placeholder.splice(0, placeholder.n_items(), &[]);
-        if source_model
-            .as_ref()
-            .is_some_and(|model| model.n_items() == 0)
-            && let Some(stack) = stack.and_then(|stack| stack.upgrade())
-        {
-            stack.set_visible_child_name("status");
-        }
-    });
 }
 
 struct IconsControls {
@@ -1900,8 +1634,6 @@ struct IconsContext {
     cuts: Rc<RefCell<HashSet<Location>>>,
     state: Option<Weak<super::browser::ViewState>>,
     thumbnail_size: Rc<Cell<i32>>,
-    active_new_entry: Rc<RefCell<Option<ActiveModeNewEntry>>>,
-    new_entry_is_directory: Rc<Cell<bool>>,
     source_index: SourceIndexMap,
     sections: Weak<RefCell<Vec<PaneSection>>>,
     density: Cell<BrowserDensity>,
@@ -1949,8 +1681,6 @@ fn build_icons_pane(
     super::browser::debounce_filter_entry(&controls.filter_entry, move |text| {
         super::browser::notify_filter_query(&filter_for_settled, &query_for_filter, text);
     });
-    let new_entry_placeholder = gtk::StringList::new(&[]);
-    let new_entry_is_directory = Rc::new(Cell::new(true));
     let sections: Rc<RefCell<Vec<PaneSection>>> = Rc::new(RefCell::new(Vec::new()));
     let context = Rc::new(IconsContext {
         browser,
@@ -1960,24 +1690,19 @@ fn build_icons_pane(
         cuts: cut_locations,
         state: options.state,
         thumbnail_size: options.thumbnail_size.clone(),
-        active_new_entry: options.active_new_entry,
-        new_entry_is_directory: new_entry_is_directory.clone(),
         source_index: source_index.clone(),
         sections: Rc::downgrade(&sections),
         density: Cell::new(options.density),
         scrolling: Rc::new(Cell::new(false)),
     });
-    let flattened_models = gio::ListStore::new::<gio::ListModel>();
-    flattened_models.append(&new_entry_placeholder.clone().upcast::<gio::ListModel>());
-    flattened_models.append(&filtered_model.clone().upcast::<gio::ListModel>());
-    let flattened = gtk::FlattenListModel::new(Some(flattened_models));
     let view_model = if options.group_by_type {
-        let sorted = gtk::SortListModel::new(Some(flattened), None::<gtk::CustomSorter>);
+        let sorted =
+            gtk::SortListModel::new(Some(filtered_model.clone()), None::<gtk::CustomSorter>);
         let sorter = type_group_sorter();
         sorted.set_sorter(Some(&sorter));
         sorted.upcast::<gio::ListModel>()
     } else {
-        flattened.upcast()
+        filtered_model.clone().upcast()
     };
     let pane_section = build_icons_view(&context, &view_model);
     pane_section.view.set_vexpand(true);
@@ -2096,8 +1821,6 @@ fn build_icons_pane(
         filter_entry: Some(controls.filter_entry),
         filter_button: Some(controls.filter_button),
         empty_trash_button: controls.empty_trash_button,
-        new_entry_placeholder: Some(new_entry_placeholder),
-        new_entry_is_directory: Some(new_entry_is_directory),
         show_hidden,
         filter: filter_for_pane,
     };
@@ -2185,18 +1908,12 @@ fn build_icons_view(context: &Rc<IconsContext>, model: &impl IsA<gio::ListModel>
     let source_index_for_bind = context.source_index.clone();
     let cuts_for_bind = context.cuts.clone();
     let thumbnail_size_for_bind = context.thumbnail_size.clone();
-    let entry_kind_for_bind = context.new_entry_is_directory.clone();
     let scrolling_for_bind = context.scrolling.clone();
-    let active_for_bind = context.active_new_entry.clone();
-    let location_for_bind = context.browser.location_at(depth);
     factory.connect_bind(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
         let Some(card) = item.child().and_downcast::<gtk::Box>() else {
-            return;
-        };
-        let Some((icon, label)) = super::icons_cell::parts(&card) else {
             return;
         };
         let source_position = item
@@ -2223,26 +1940,6 @@ fn build_icons_view(context: &Rc<IconsContext>, model: &impl IsA<gio::ListModel>
             {
                 browser.request_metadata_fill(depth, position, entry.location.clone());
             }
-        } else {
-            set_mode_cut_style(&card, false);
-            let icon_name = if entry_kind_for_bind.get() {
-                crate::assets::icons::FOLDER
-            } else {
-                crate::assets::icons::DOCUMENTS
-            };
-            crate::ui::thumbnail::show_fallback_icon(&icon, icon_name, thumbnail_size);
-            icon.set_opacity(1.0);
-            label.set_visible(false);
-            let Some(field) = super::icons_cell::ensure_rename_field(&card) else {
-                return;
-            };
-            install_icons_new_entry_handlers(
-                &field,
-                active_for_bind.clone(),
-                browser_for_bind.clone(),
-                location_for_bind.clone(),
-            );
-            field.set_visible(true);
         }
     });
     factory.connect_unbind(|_, item| super::thumbnail::cancel_list_item_thumbnails(item));
@@ -2711,7 +2408,6 @@ fn build_list_pane(
     depth: usize,
     title: &str,
 ) -> Pane {
-    let active_new_entry = options.active_new_entry.clone();
     let navigation = list_navigation(&browser);
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     actions.add_css_class("icons-header-actions");
@@ -2758,13 +2454,8 @@ fn build_list_pane(
     super::browser::debounce_filter_entry(&filter_entry, move |text| {
         super::browser::notify_filter_query(&filter_for_settled, &query_for_filter, text);
     });
-    let new_entry_placeholder = gtk::StringList::new(&[]);
-    let new_entry_is_directory = Rc::new(Cell::new(true));
-    let flattened_models = gio::ListStore::new::<gio::ListModel>();
-    flattened_models.append(&new_entry_placeholder.clone().upcast::<gio::ListModel>());
-    flattened_models.append(&filtered_model.clone().upcast::<gio::ListModel>());
-    let flattened = gtk::FlattenListModel::new(Some(flattened_models));
-    let view_model = gtk::SortListModel::new(Some(flattened), None::<gtk::CustomSorter>);
+    let view_model =
+        gtk::SortListModel::new(Some(filtered_model.clone()), None::<gtk::CustomSorter>);
     if options.group_by_type {
         let sorter = type_group_sorter();
         view_model.set_sorter(Some(&sorter));
@@ -2785,14 +2476,12 @@ fn build_list_pane(
     let previews_for_setup = click_options.previews;
     let activation_for_setup = click_options.activation;
     let transfers_for_setup = transfer_handler.clone();
-    let active_for_setup = active_new_entry.clone();
     let source_index_for_setup = source_index.clone();
     let view_model_for_setup = view_model_object.clone();
     let positions_for_setup = PanePositions {
         index: source_index_for_setup.clone(),
         view: view_model_for_setup.clone(),
     };
-    let folder_location = browser.location_at(depth);
     let scrolling = Rc::new(Cell::new(false));
     let scrolling_for_setup = scrolling.clone();
     factory.connect_setup(move |_, item| {
@@ -2809,33 +2498,12 @@ fn build_list_pane(
                 }
             });
         }
-        let Some((_, name, field, mode, size, kind, modified)) = list_row_parts(&row) else {
+        let Some((_, name, _, mode, size, kind, modified)) = list_row_parts(&row) else {
             return;
         };
         let Some(name_cell) = row.first_child() else {
             return;
         };
-        field.connect_changed(|field| {
-            super::browser::update_basename_validation(field);
-        });
-        let active_for_submit = active_for_setup.clone();
-        let browser_for_submit = browser_for_setup.clone();
-        let location_for_submit = folder_location.clone();
-        field.connect_activate(move |field| {
-            submit_mode_new_entry(
-                &active_for_submit,
-                &browser_for_submit,
-                &location_for_submit,
-                field,
-            );
-        });
-        let focus = gtk::EventControllerFocus::new();
-        let active_for_leave = active_for_setup.clone();
-        let field_for_leave = field.clone();
-        focus.connect_leave(move |_| {
-            cancel_mode_new_entry_for_field(&active_for_leave, &field_for_leave);
-        });
-        field.add_controller(focus);
         for (index, widget) in [
             name_cell,
             mode.upcast(),
@@ -2880,7 +2548,6 @@ fn build_list_pane(
     let browser_for_bind = Rc::downgrade(&browser);
     let source_index_for_bind = source_index.clone();
     let cuts_for_bind = cut_locations.clone();
-    let entry_kind_for_bind = new_entry_is_directory.clone();
     let scrolling_for_bind = scrolling.clone();
     factory.connect_bind(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -2927,14 +2594,10 @@ fn build_list_pane(
             }
         } else {
             row.remove_css_class("cut-item");
-            let icon_name = if entry_kind_for_bind.get() {
-                crate::assets::icons::FOLDER
-            } else {
-                crate::assets::icons::DOCUMENTS
-            };
-            crate::ui::thumbnail::show_fallback_icon(&icon, icon_name, 18);
-            name.set_visible(false);
-            field.set_visible(true);
+            crate::ui::thumbnail::show_fallback_icon(&icon, crate::assets::icons::DOCUMENTS, 18);
+            name.set_label("");
+            name.set_visible(true);
+            field.set_visible(false);
             mode.set_label("");
             size.set_label("");
             kind.set_label("");
@@ -3059,8 +2722,6 @@ fn build_list_pane(
         filter_entry: Some(filter_entry),
         filter_button: Some(filter_button),
         empty_trash_button: is_trash.then_some(empty_trash),
-        new_entry_placeholder: Some(new_entry_placeholder),
-        new_entry_is_directory: Some(new_entry_is_directory),
         show_hidden,
         filter: filter_for_pane,
     };
@@ -3538,7 +3199,7 @@ impl PanePositions {
 
     fn view_position(&self, source_position: usize) -> Option<u32> {
         let guessed = source_position as u32;
-        // Unfiltered views keep source order; a leading placeholder shifts by one.
+        // Unfiltered views keep source order; a non-source prefix shifts positions.
         [guessed, guessed.saturating_add(1)]
             .into_iter()
             .find(|candidate| self.source_position(*candidate) == Some(source_position))
@@ -3652,7 +3313,7 @@ fn view_position_for_source(
     };
     let item = source.item(position as u32)?;
     let guessed = position as u32;
-    // Unfiltered views (and FlattenListModel with an empty placeholder) keep source order.
+    // Unfiltered views keep source order.
     if filtered.item(guessed).is_some_and(|value| value == item) {
         return Some(guessed);
     }
@@ -4251,9 +3912,8 @@ fn update_bound_list_metadata(pane: &Pane, updates: &[(usize, FileEntry)]) {
     }
 }
 
-/// Orders file-type groups: the inline new-entry row leads, then folders, then the
-/// remaining labels alphabetically, so a group's place does not depend on which
-/// entries happen to be loaded.
+/// Orders empty model values first, then folders and the remaining type labels
+/// alphabetically, independently of which entries have loaded.
 fn compare_type_groups(left: &str, right: &str) -> std::cmp::Ordering {
     fn rank(label: &str) -> u8 {
         match label {
@@ -4273,8 +3933,7 @@ fn model_value(item: &glib::Object) -> String {
         .unwrap_or_default()
 }
 
-/// The group a model value belongs to. The inline new-entry row carries no value and
-/// stays in a group of its own, ahead of the entries.
+/// Empty model values have no file-type group.
 fn value_type_group(value: &str) -> String {
     if value.is_empty() {
         return String::new();

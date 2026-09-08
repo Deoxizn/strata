@@ -109,6 +109,14 @@ def test_inline_fields_are_named(strata):
     assert strata.fixture.path("new folder").is_dir()
     strata.keyboard.press("Escape")
 
+    strata.pointer.right_click(strata.pane(), at=strata.background_point())
+    strata.choose_menu_item("New File")
+    field = strata.editable_field()
+    assert field.name == "Rename"
+    assert field.text == "new file"
+    assert strata.fixture.path("new file").is_file()
+    strata.keyboard.press("Escape")
+
 
 def test_focus_order_reaches_the_files_from_the_header(strata):
     """Tab from the window's first control eventually reaches the listing."""

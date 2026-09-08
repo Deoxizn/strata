@@ -44,7 +44,11 @@ fn invalid_new_folder_names_are_rejected_before_an_operation_starts() {
         "nul\0name",
     ] {
         assert_invalid_creation_is_rejected(name, |browser| {
-            browser.create_directory(Location::local("/fixture"), name.to_owned());
+            browser.create_directory_with_naming(
+                Location::local("/fixture"),
+                name.to_owned(),
+                false,
+            );
         });
     }
 }
@@ -61,7 +65,7 @@ fn invalid_new_file_names_are_rejected_before_an_operation_starts() {
         "nul\0name",
     ] {
         assert_invalid_creation_is_rejected(name, |browser| {
-            browser.create_file(Location::local("/fixture"), name.to_owned());
+            browser.create_file_with_naming(Location::local("/fixture"), name.to_owned(), false);
         });
     }
 }
@@ -84,7 +88,7 @@ fn assert_invalid_creation_is_rejected(name: &str, create: impl FnOnce(&Rc<Brows
 }
 
 #[test]
-fn new_folder_requests_unique_naming_and_reports_the_created_location() {
+fn new_files_and_folders_request_unique_naming_and_report_the_created_location() {
     let browser = Browser::new(Rc::new(FakeFileSource));
     browser.set_operation_provider(Rc::new(ImmediateOperationProvider));
     let events = Rc::new(RefCell::new(Vec::new()));
@@ -92,7 +96,11 @@ fn new_folder_requests_unique_naming_and_reports_the_created_location() {
     browser.observe(move |event| observed.borrow_mut().push(event.clone()));
     browser.create_new_folder(Location::local("/fixture"));
     assert!(events.borrow().iter().any(|event| matches!(event,
-        BrowserEvent::DirectoryCreated { location } if location == &Location::local("/fixture/new folder")
+        BrowserEvent::EntryCreated { location } if location == &Location::local("/fixture/new folder")
+    )));
+    browser.create_new_file(Location::local("/fixture"));
+    assert!(events.borrow().iter().any(|event| matches!(event,
+        BrowserEvent::EntryCreated { location } if location == &Location::local("/fixture/new file")
     )));
     assert!(browser.current_operation.get().is_none());
 }
@@ -640,7 +648,7 @@ impl OperationProvider for ImmediateOperationProvider {
         if request.unique_name {
             let child =
                 crate::adapters::gio_file_for_location(&request.parent).child(&request.name);
-            emit(OperationEvent::DirectoryCreated {
+            emit(OperationEvent::EntryCreated {
                 request_id: request.id,
                 location: crate::adapters::location_for_file(&child).expect("created location"),
             });
@@ -657,9 +665,18 @@ impl OperationProvider for ImmediateOperationProvider {
         request: CreateFileRequest,
         emit: Rc<dyn Fn(OperationEvent)>,
     ) -> LoadHandle {
-        emit(OperationEvent::Created {
-            request_id: request.id,
-        });
+        if request.unique_name {
+            let child =
+                crate::adapters::gio_file_for_location(&request.parent).child(&request.name);
+            emit(OperationEvent::EntryCreated {
+                request_id: request.id,
+                location: crate::adapters::location_for_file(&child).expect("created location"),
+            });
+        } else {
+            emit(OperationEvent::Created {
+                request_id: request.id,
+            });
+        }
         LoadHandle::new(|| {})
     }
 
@@ -1516,7 +1533,11 @@ fn creating_a_directory_on_a_remote_location_refreshes_the_open_column() {
     browser.navigate(Location::uri("smb://host/share"));
     assert_eq!(enumerate_calls.get(), 1);
 
-    browser.create_directory(Location::uri("smb://host/share"), "New Folder".to_owned());
+    browser.create_directory_with_naming(
+        Location::uri("smb://host/share"),
+        "New Folder".to_owned(),
+        false,
+    );
 
     assert_eq!(
         enumerate_calls.get(),
@@ -1564,7 +1585,11 @@ fn creating_a_directory_locally_does_not_trigger_a_redundant_refresh() {
     browser.navigate(Location::local("/fixture"));
     assert_eq!(enumerate_calls.get(), 1);
 
-    browser.create_directory(Location::local("/fixture"), "New Folder".to_owned());
+    browser.create_directory_with_naming(
+        Location::local("/fixture"),
+        "New Folder".to_owned(),
+        false,
+    );
 
     assert_eq!(
         enumerate_calls.get(),
