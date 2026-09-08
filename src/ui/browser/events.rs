@@ -31,10 +31,12 @@ impl ViewState {
     pub(super) fn handle(self: &Rc<Self>, event: &BrowserEvent) {
         match event {
             BrowserEvent::Reset => {
+                self.pending_folder_rename.take();
                 self.pending_location_credentials.take();
                 self.truncate(0);
             }
             BrowserEvent::ColumnsTruncated { len } => {
+                self.pending_folder_rename.take();
                 self.truncate(*len);
                 self.sync_active_location();
             }
@@ -404,16 +406,44 @@ impl ViewState {
                     open_location(location, &self.overlay);
                 }
             }
+            BrowserEvent::DirectoryCreated { location } => {
+                self.rename_created_folder(location);
+            }
             BrowserEvent::RenameCompleted => {
-                self.cancel_rename();
-                self.browser.focus_active();
+                let submitting = self
+                    .active_rename
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|active| !active.field.is_sensitive())
+                    || self
+                        .mode_views
+                        .borrow()
+                        .active_rename_target()
+                        .is_some_and(|(field, _)| !field.is_sensitive());
+                if submitting {
+                    self.cancel_rename();
+                    self.browser.focus_active();
+                }
             }
             BrowserEvent::RenameFailed { message } => {
-                if let Some(rename) = self.active_rename.borrow().as_ref() {
-                    rename.field.set_sensitive(true);
-                    rename.field.add_css_class("error");
-                    rename.field.set_tooltip_text(Some(message));
-                    rename.field.grab_focus();
+                let field = self
+                    .active_rename
+                    .borrow()
+                    .as_ref()
+                    .filter(|active| !active.field.is_sensitive())
+                    .map(|active| active.field.clone());
+                if let Some(field) = field {
+                    field.set_sensitive(true);
+                    field.add_css_class("error");
+                    field.set_tooltip_text(Some(message));
+                    field.grab_focus();
+                } else if !self
+                    .mode_views
+                    .borrow()
+                    .active_rename_target()
+                    .is_some_and(|(field, _)| !field.is_sensitive())
+                {
+                    show_error_dialog(&self.overlay, "Unable to rename folder", message);
                 }
             }
             BrowserEvent::TransferStarted { total, moving } => {
@@ -477,6 +507,7 @@ impl ViewState {
             }
             BrowserEvent::RestorationFinished => self.dismiss_file_operation_progress(),
             BrowserEvent::OperationFailed { message } => {
+                self.pending_folder_rename.take();
                 self.dismiss_file_operation_progress();
                 let retry = self.pending_extract_retry.take();
                 if let Some((entry, dest)) = retry {

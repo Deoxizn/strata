@@ -10,6 +10,8 @@ use crate::{
 };
 use std::time::{Duration, Instant};
 
+mod folders;
+
 #[test]
 fn an_empty_name_is_not_flagged_as_an_error() {
     assert!(basename_field_error("bad/name").is_some());
@@ -63,92 +65,84 @@ fn icon_card_bounds(root: &gtk::Widget) -> Vec<(i32, i32, i32, i32)> {
 }
 
 #[test]
-fn new_entries_require_enter_and_a_nonblank_name_in_every_mode() {
+fn new_files_require_enter_and_a_nonblank_name_in_every_mode() {
     gtk_test(
-        "ui::browser::inline_edit::tests::new_entries_require_enter_and_a_nonblank_name_in_every_mode",
+        "ui::browser::inline_edit::tests::new_files_require_enter_and_a_nonblank_name_in_every_mode",
         || {
             for mode in [BrowserMode::Columns, BrowserMode::List, BrowserMode::Icons] {
-                for is_directory in [true, false] {
-                    for (name, enter) in [
-                        ("discarded", false),
-                        ("created", true),
-                        ("", true),
-                        (" \u{2003} ", true),
-                    ] {
-                        let fixture = tempfile::tempdir().expect("directory fixture");
-                        let path = fixture.path();
-                        std::fs::write(path.join("alpha.txt"), b"alpha").expect("fixture file");
-                        let view = BrowserView::new(
-                            Rc::new(crate::adapters::LocalFileSource),
-                            PeekBehavior::default(),
-                        );
-                        view.set_operation_provider(Rc::new(
-                            crate::adapters::LocalOperationProvider,
-                        ));
-                        view.set_view_mode(mode);
-                        let window = gtk::Window::builder()
-                            .child(&view.widget())
-                            .default_width(800)
-                            .default_height(600)
-                            .build();
-                        window.present();
-                        let browser = view.browser();
-                        browser.navigate(Location::local(path));
+                for (name, enter) in [
+                    ("discarded", false),
+                    ("created", true),
+                    ("", true),
+                    (" \u{2003} ", true),
+                ] {
+                    let fixture = tempfile::tempdir().expect("directory fixture");
+                    let path = fixture.path();
+                    std::fs::write(path.join("alpha.txt"), b"alpha").expect("fixture file");
+                    let view = BrowserView::new(
+                        Rc::new(crate::adapters::LocalFileSource),
+                        PeekBehavior::default(),
+                    );
+                    view.set_operation_provider(Rc::new(crate::adapters::LocalOperationProvider));
+                    view.set_view_mode(mode);
+                    let window = gtk::Window::builder()
+                        .child(&view.widget())
+                        .default_width(800)
+                        .default_height(600)
+                        .build();
+                    window.present();
+                    let browser = view.browser();
+                    browser.navigate(Location::local(path));
+                    wait_until(|| {
+                        browser
+                            .column_snapshot(0)
+                            .is_some_and(|snapshot| !snapshot.loading)
+                    });
+                    view.state.begin_new_entry(0, Location::local(path), false);
+                    let active_field = || {
+                        if mode == BrowserMode::Columns {
+                            view.state
+                                .active_new_entry
+                                .borrow()
+                                .as_ref()
+                                .map(|active| active.field.clone())
+                        } else {
+                            view.state.mode_views.borrow().active_new_entry_field()
+                        }
+                    };
+                    wait_until(|| active_field().is_some());
+                    let field = active_field().expect("new entry field");
+                    field.set_text(name);
+                    let controllers = field.observe_controllers();
+                    let focus = (0..controllers.n_items())
+                        .find_map(|index| {
+                            controllers
+                                .item(index)
+                                .and_downcast::<gtk::EventControllerFocus>()
+                        })
+                        .expect("focus controller on the new entry field");
+                    if enter {
+                        field.emit_activate();
+                    } else {
+                        focus.emit_by_name::<()>("leave", &[]);
+                    }
+                    wait_until(|| active_field().is_none());
+                    if enter && !name.trim().is_empty() {
+                        wait_until(|| path.join(name).exists());
+                        assert!(path.join(name).is_file());
                         wait_until(|| {
                             browser
                                 .column_snapshot(0)
-                                .is_some_and(|snapshot| !snapshot.loading)
+                                .is_some_and(|snapshot| snapshot.count == 2)
                         });
-                        view.state
-                            .begin_new_entry(0, Location::local(path), is_directory);
-                        let active_field = || {
-                            if mode == BrowserMode::Columns {
-                                view.state
-                                    .active_new_entry
-                                    .borrow()
-                                    .as_ref()
-                                    .map(|active| active.field.clone())
-                            } else {
-                                view.state.mode_views.borrow().active_new_entry_field()
-                            }
-                        };
-                        wait_until(|| active_field().is_some());
-                        let field = active_field().expect("new entry field");
-                        field.set_text(name);
-                        let controllers = field.observe_controllers();
-                        let focus = (0..controllers.n_items())
-                            .find_map(|index| {
-                                controllers
-                                    .item(index)
-                                    .and_downcast::<gtk::EventControllerFocus>()
-                            })
-                            .expect("focus controller on the new entry field");
-                        if enter {
-                            field.emit_activate();
-                        } else {
-                            focus.emit_by_name::<()>("leave", &[]);
+                    } else {
+                        while glib::MainContext::default().pending() {
+                            glib::MainContext::default().iteration(false);
                         }
-                        wait_until(|| active_field().is_none());
-                        if enter && !name.trim().is_empty() {
-                            wait_until(|| path.join(name).exists());
-                            assert_eq!(path.join(name).is_dir(), is_directory);
-                            wait_until(|| {
-                                browser
-                                    .column_snapshot(0)
-                                    .is_some_and(|snapshot| snapshot.count == 2)
-                            });
-                        } else {
-                            while glib::MainContext::default().pending() {
-                                glib::MainContext::default().iteration(false);
-                            }
-                            assert_eq!(
-                                std::fs::read_dir(path).expect("fixture listing").count(),
-                                1
-                            );
-                        }
-                        browser.clear_observer();
-                        window.destroy();
+                        assert_eq!(std::fs::read_dir(path).expect("fixture listing").count(), 1);
                     }
+                    browser.clear_observer();
+                    window.destroy();
                 }
             }
         },

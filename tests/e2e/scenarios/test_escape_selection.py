@@ -89,7 +89,10 @@ def test_escape_dismisses_transient_before_selection(strata, mode, surface):
         strata.wait(lambda: strata.dialog() is None, "properties to close")
     elif surface == "preview":
         strata.wait(lambda: strata.preview() is None, "preview to close")
-    strata.wait_for_selection(["readme.md"], root)
+    expected = "new folder" if surface == "new-folder" else "readme.md"
+    strata.wait_for_selection([expected], root)
+    if surface == "new-folder":
+        assert strata.fixture.path("new folder").is_dir()
     strata.keyboard.press("Escape")
     strata.wait_for_selection([], root)
     assert strata.pane_names() == [root]

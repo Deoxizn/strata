@@ -173,19 +173,21 @@ def test_something(strata):
 
 ### Inline new-entry focus regressions
 
-`test_entry_management.py` covers new-file/folder click-away cancellation onto a
-file, folder, sidebar location, and empty space in all three views. It also
-covers keyboard focus loss, blank-name cancellation, invalid-name correction,
-clicking inside the field, exact valid names, existing-name protection, and
-cancel/reopen in an empty directory. Run it with:
+`test_folder_renaming.py` checks immediate default-folder creation, collision
+numbering, whole-name selection, valid-name commits on click-away, and retaining
+the original name on Escape or invalid input. It exercises existing and newly
+created folders in all three views, including repeated dotted-name renames.
+`test_entry_management.py` also covers New File cancellation, invalid-name
+correction, inside-field clicks, existing-name protection, and empty directories.
 
 ```bash
-./scripts/e2e.sh tests/e2e/scenarios/test_entry_management.py
+./scripts/e2e.sh tests/e2e/scenarios/test_folder_renaming.py tests/e2e/scenarios/test_entry_management.py
 ```
 
 Keep these as real XTEST pointer interactions: emitting a focus controller's
-`leave` signal in a Rust test checks cancellation, not GTK's in-flight focus walk
-(#566). List/Icons placeholder removal must wait until that walk returns. The
+`leave` signal in a Rust test checks the handler, not GTK's in-flight focus walk
+(#566). Folder rename dispatch and List/Icons New File placeholder removal must
+wait until that walk returns. The
 cleanup identifies the original placeholder item, not the recyclable Entry
 widget, and reads the current listing before restoring the empty state. Rust
 unit tests cover these deferred-cleanup races separately.

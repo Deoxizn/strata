@@ -38,6 +38,7 @@ pub struct CreateDirectoryRequest {
     pub id: OperationRequestId,
     pub parent: Location,
     pub name: String,
+    pub unique_name: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -183,6 +184,10 @@ pub enum OperationEvent {
     },
     Created {
         request_id: OperationRequestId,
+    },
+    DirectoryCreated {
+        request_id: OperationRequestId,
+        location: Location,
     },
     Pasted {
         request_id: OperationRequestId,

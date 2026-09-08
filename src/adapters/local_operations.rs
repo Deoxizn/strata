@@ -2189,63 +2189,90 @@ impl OperationProvider for LocalOperationProvider {
         let operation_cancellable = cancellable.clone();
         let _task = glib::MainContext::default().spawn_local(async move {
             let parent = gio_file_for_location(&request.parent);
-            let folder = match validated_child(&parent, &request.name) {
-                Ok(folder) => folder,
-                Err(message) => {
+            let mut suffix = 0u64;
+            loop {
+                let name = if suffix == 0 {
+                    request.name.clone()
+                } else {
+                    format!("{} ({suffix})", request.name)
+                };
+                let folder = match validated_child(&parent, &name) {
+                    Ok(folder) => folder,
+                    Err(message) => {
+                        emit(OperationEvent::Failed {
+                            request_id: request.id,
+                            message: message.to_owned(),
+                        });
+                        return;
+                    }
+                };
+                let Some(item) = location_for_file(&folder) else {
                     emit(OperationEvent::Failed {
                         request_id: request.id,
-                        message: message.to_owned(),
+                        message: "The new folder has an invalid URI".to_owned(),
                     });
                     return;
-                }
-            };
-            let Some(item) = location_for_file(&folder) else {
-                emit(OperationEvent::Failed {
-                    request_id: request.id,
-                    message: "The new folder has an invalid URI".to_owned(),
-                });
-                return;
-            };
-            let affected_locations = HashSet::from([request.parent.clone()]);
-            if operation_cancellable.is_cancelled() {
-                emit(cancelled_event(
-                    request.id,
-                    Vec::new(),
-                    Vec::new(),
-                    vec![item],
-                    affected_locations,
-                ));
-                return;
-            }
-            match await_cancellable(
-                &folder,
-                &operation_cancellable,
-                |folder, cancellable, result| {
-                    folder.make_directory_async(
-                        glib::Priority::DEFAULT,
-                        Some(cancellable),
-                        move |output| result.resolve(output),
-                    );
-                },
-            )
-            .await
-            {
-                Ok(()) => emit(OperationEvent::Created {
-                    request_id: request.id,
-                }),
-                Err(error) if was_cancelled(&error) => {
+                };
+                let affected_locations = HashSet::from([request.parent.clone()]);
+                if operation_cancellable.is_cancelled() {
                     emit(cancelled_event(
                         request.id,
                         Vec::new(),
-                        vec![item],
                         Vec::new(),
+                        vec![item],
                         affected_locations,
                     ));
+                    return;
                 }
-                Err(error) => emit(OperationEvent::Failed {
-                    request_id: request.id,
-                    message: error.to_string(),
-                }),
+                match await_cancellable(
+                    &folder,
+                    &operation_cancellable,
+                    |folder, cancellable, result| {
+                        folder.make_directory_async(
+                            glib::Priority::DEFAULT,
+                            Some(cancellable),
+                            move |output| result.resolve(output),
+                        );
+                    },
+                )
+                .await
+                {
+                    Ok(()) => {
+                        if request.unique_name {
+                            emit(OperationEvent::DirectoryCreated {
+                                request_id: request.id,
+                                location: item,
+                            });
+                        } else {
+                            emit(OperationEvent::Created {
+                                request_id: request.id,
+                            });
+                        }
+                    }
+                    // Retry only an atomic mkdir collision; never preflight with exists().
+                    Err(error)
+                        if request.unique_name
+                            && error.matches(gio::IOErrorEnum::Exists)
+                            && suffix < u64::MAX =>
+                    {
+                        suffix += 1;
+                        continue;
+                    }
+                    Err(error) if was_cancelled(&error) => {
+                        emit(cancelled_event(
+                            request.id,
+                            Vec::new(),
+                            vec![item],
+                            Vec::new(),
+                            affected_locations,
+                        ));
+                    }
+                    Err(error) => emit(OperationEvent::Failed {
+                        request_id: request.id,
+                        message: error.to_string(),
+                    }),
+                }
+                break;
             }
         });
         cancellation_handle(cancellable)

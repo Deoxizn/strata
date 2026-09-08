@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use gtk::prelude::FileExt;
 use std::{cell::Cell, ffi::OsString};
 
 use super::*;
@@ -80,6 +81,20 @@ fn assert_invalid_creation_is_rejected(name: &str, create: impl FnOnce(&Rc<Brows
         events.borrow().as_slice(),
         [BrowserEvent::OperationFailed { message }] if message == expected
     ));
+}
+
+#[test]
+fn new_folder_requests_unique_naming_and_reports_the_created_location() {
+    let browser = Browser::new(Rc::new(FakeFileSource));
+    browser.set_operation_provider(Rc::new(ImmediateOperationProvider));
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    browser.observe(move |event| observed.borrow_mut().push(event.clone()));
+    browser.create_new_folder(Location::local("/fixture"));
+    assert!(events.borrow().iter().any(|event| matches!(event,
+        BrowserEvent::DirectoryCreated { location } if location == &Location::local("/fixture/new folder")
+    )));
+    assert!(browser.current_operation.get().is_none());
 }
 
 #[test]
@@ -622,9 +637,18 @@ impl OperationProvider for ImmediateOperationProvider {
         request: CreateDirectoryRequest,
         emit: Rc<dyn Fn(OperationEvent)>,
     ) -> LoadHandle {
-        emit(OperationEvent::Created {
-            request_id: request.id,
-        });
+        if request.unique_name {
+            let child =
+                crate::adapters::gio_file_for_location(&request.parent).child(&request.name);
+            emit(OperationEvent::DirectoryCreated {
+                request_id: request.id,
+                location: crate::adapters::location_for_file(&child).expect("created location"),
+            });
+        } else {
+            emit(OperationEvent::Created {
+                request_id: request.id,
+            });
+        }
         LoadHandle::new(|| {})
     }
 

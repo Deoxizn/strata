@@ -132,6 +132,9 @@ pub enum BrowserEvent {
         location: Location,
     },
     RenameCompleted,
+    DirectoryCreated {
+        location: Location,
+    },
     RenameFailed {
         message: String,
     },
@@ -1284,6 +1287,19 @@ impl Browser {
     }
 
     pub fn create_directory(self: &Rc<Self>, parent: Location, name: String) {
+        self.create_directory_with_naming(parent, name, false);
+    }
+
+    pub fn create_new_folder(self: &Rc<Self>, parent: Location) {
+        self.create_directory_with_naming(parent, "new folder".to_owned(), true);
+    }
+
+    fn create_directory_with_naming(
+        self: &Rc<Self>,
+        parent: Location,
+        name: String,
+        unique_name: bool,
+    ) {
         if let Err(message) = validate_basename(&name) {
             self.emit(BrowserEvent::OperationFailed {
                 message: message.to_owned(),
@@ -1303,6 +1319,7 @@ impl Browser {
                 id: request_id,
                 parent,
                 name,
+                unique_name,
             },
             self.operation_callback(request_id, false, HashSet::from([refresh_parent])),
         );
@@ -1672,6 +1689,7 @@ impl Browser {
             let event_id = match &event {
                 OperationEvent::Renamed { request_id }
                 | OperationEvent::Created { request_id }
+                | OperationEvent::DirectoryCreated { request_id, .. }
                 | OperationEvent::Pasted { request_id, .. }
                 | OperationEvent::TransferFailed { request_id, .. }
                 | OperationEvent::TransferProgress { request_id, .. }
@@ -1972,6 +1990,16 @@ impl Browser {
                         });
                     }
                     browser.emit(BrowserEvent::TransferCompleted);
+                }
+                OperationEvent::DirectoryCreated { location, .. } => {
+                    if browser.validation_generation.get() == navigation_generation {
+                        browser.emit(BrowserEvent::DirectoryCreated { location });
+                    }
+                    for location in &refresh_locations {
+                        if location.native_path().is_none() {
+                            browser.refresh_columns_at(location);
+                        }
+                    }
                 }
                 OperationEvent::Created { .. } => {
                     for location in &refresh_locations {

@@ -8,6 +8,13 @@ import pytest
 from harness.modes import ALL_MODES
 
 
+def start_new_file(strata):
+    strata.select_entry("readme.md")
+    strata.pointer.right_click(strata.pane(), at=strata.background_point())
+    strata.choose_menu_item("New File")
+    return strata.editable_field()
+
+
 @pytest.mark.parametrize("mode", ALL_MODES)
 def test_create_folder_from_the_keyboard(strata, mode):
     fixture = strata.fixture
@@ -28,15 +35,8 @@ def test_create_folder_from_the_keyboard(strata, mode):
 
 @pytest.mark.parametrize("mode", ALL_MODES)
 @pytest.mark.parametrize("target", ["file", "folder", "sidebar", "background"])
-@pytest.mark.parametrize("kind", ["file", "folder"])
-def test_clicking_away_cancels_new_entries(strata, mode, target, kind):
-    strata.select_entry("readme.md")
-    if kind == "folder":
-        strata.keyboard.press("ctrl+shift+n")
-    else:
-        strata.pointer.right_click(strata.pane(), at=strata.background_point())
-        strata.choose_menu_item("New File")
-    field = strata.editable_field()
+def test_clicking_away_cancels_new_files(strata, mode, target):
+    field = start_new_file(strata)
     strata.keyboard.type_text("click-away-entry")
     strata.wait(lambda: field.text == "click-away-entry", "the name to appear")
 
@@ -63,11 +63,9 @@ def test_clicking_away_cancels_new_entries(strata, mode, target, kind):
 
 @pytest.mark.parametrize("mode", ALL_MODES)
 @pytest.mark.parametrize("name", ["", "   ", "bad/name"])
-def test_clicking_away_does_not_submit_an_invalid_new_entry(strata, mode, name):
+def test_clicking_away_does_not_submit_an_invalid_new_file(strata, mode, name):
     original = sorted(strata.fixture.names())
-    strata.select_entry("readme.md")
-    strata.keyboard.press("ctrl+shift+n")
-    field = strata.editable_field()
+    field = start_new_file(strata)
     strata.keyboard.type_text(name)
     strata.wait(lambda: field.text == name, "the invalid name to appear")
     strata.pointer.click(strata.entry("todo.txt"))
@@ -83,11 +81,9 @@ def test_clicking_away_does_not_submit_an_invalid_new_entry(strata, mode, name):
 
 @pytest.mark.parametrize("mode", ALL_MODES)
 @pytest.mark.parametrize("name", ["", "   "])
-def test_enter_with_a_blank_new_entry_cancels(strata, mode, name):
+def test_enter_with_a_blank_new_file_cancels(strata, mode, name):
     original = strata.fixture.names()
-    strata.select_entry("readme.md")
-    strata.keyboard.press("ctrl+shift+n")
-    field = strata.editable_field()
+    field = start_new_file(strata)
     strata.keyboard.type_text(name)
     strata.wait(lambda: field.text == name, "the blank name to appear")
     strata.keyboard.press("Return")
@@ -102,11 +98,9 @@ def test_enter_with_a_blank_new_entry_cancels(strata, mode, name):
 
 @pytest.mark.parametrize("mode", ALL_MODES)
 @pytest.mark.parametrize("name", [".", "..", "bad/name", "/absolute"])
-def test_invalid_new_entry_names_can_be_corrected(strata, mode, name):
+def test_invalid_new_file_names_can_be_corrected(strata, mode, name):
     original = strata.fixture.names()
-    strata.select_entry("readme.md")
-    strata.keyboard.press("ctrl+shift+n")
-    field = strata.editable_field()
+    field = start_new_file(strata)
     strata.keyboard.type_text(name)
     strata.wait(lambda: field.text == name, "the invalid name to appear")
     strata.keyboard.press("Return")
@@ -115,7 +109,7 @@ def test_invalid_new_entry_names_can_be_corrected(strata, mode, name):
     strata.keyboard.press("ctrl+a")
     strata.keyboard.type_text("corrected")
     strata.keyboard.press("Return")
-    strata.wait(lambda: strata.fixture.path("corrected").is_dir(), "the corrected folder on disk")
+    strata.wait(lambda: strata.fixture.path("corrected").is_file(), "the corrected file on disk")
     strata.entry("corrected")
 
 
@@ -137,10 +131,8 @@ def test_clicking_inside_keeps_the_new_entry_and_preserves_its_name(strata, mode
 
 
 @pytest.mark.parametrize("mode", ALL_MODES)
-def test_leaving_a_new_entry_with_tab_cancels(strata, mode):
-    strata.select_entry("readme.md")
-    strata.keyboard.press("ctrl+shift+n")
-    strata.editable_field()
+def test_leaving_a_new_file_with_tab_cancels(strata, mode):
+    start_new_file(strata)
     strata.keyboard.type_text("discarded")
     strata.keyboard.press("Tab")
     strata.wait(
@@ -156,7 +148,6 @@ def test_leaving_a_new_entry_with_tab_cancels(strata, mode):
 @pytest.mark.parametrize("mode", ALL_MODES)
 @pytest.mark.parametrize("kind,name", [("file", "todo.txt"), ("folder", "archive")])
 def test_creating_an_existing_name_does_not_overwrite(strata, mode, kind, name):
-    original = strata.fixture.listing()
     strata.select_entry("readme.md")
     if kind == "folder":
         strata.keyboard.press("ctrl+shift+n")
@@ -164,11 +155,12 @@ def test_creating_an_existing_name_does_not_overwrite(strata, mode, kind, name):
         strata.pointer.right_click(strata.pane(), at=strata.background_point())
         strata.choose_menu_item("New File")
     field = strata.editable_field()
+    original = strata.fixture.listing()
     strata.keyboard.type_text(name)
     strata.wait(lambda: field.text == name, "the existing name to appear")
     strata.keyboard.press("Return")
     dialog = strata.wait_for_dialog()
-    assert dialog.name == "Unable to complete operation"
+    assert dialog.name == ("Unable to rename folder" if kind == "folder" else "Unable to complete operation")
     strata.pointer.click(strata.dialog_button("Close"))
     strata.wait(lambda: strata.dialog() is None, "the error to be dismissible")
     assert strata.fixture.listing() == original
@@ -184,7 +176,7 @@ def test_new_folder_can_be_reopened_in_an_empty_directory(strata, mode):
     strata.editable_field()
     strata.keyboard.type_text("discarded")
     strata.keyboard.press("Escape")
-    strata.wait(lambda: strata.is_empty("archive"), "the empty state to return")
+    strata.entry("new folder", directory="archive")
     strata.keyboard.press("ctrl+shift+n")
     field = strata.editable_field()
     strata.keyboard.type_text("kept")
@@ -197,7 +189,7 @@ def test_new_folder_can_be_reopened_in_an_empty_directory(strata, mode):
 
 
 @pytest.mark.parametrize("mode", ALL_MODES)
-def test_creating_a_folder_can_be_cancelled(strata, mode):
+def test_escape_keeps_the_immediately_created_folder(strata, mode):
     fixture = strata.fixture
 
     strata.select_entry("readme.md")
@@ -215,6 +207,7 @@ def test_creating_a_folder_can_be_cancelled(strata, mode):
         ".hidden.txt",
         "archive",
         "documents",
+        "new folder",
         "pictures",
         "readme.md",
         "todo.txt",

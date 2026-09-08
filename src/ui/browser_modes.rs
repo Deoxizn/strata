@@ -179,6 +179,7 @@ impl SourceIndexMap {
 }
 
 struct ActiveModeRename {
+    entry: FileEntry,
     field: gtk::Entry,
     label: gtk::Widget,
 }
@@ -624,14 +625,36 @@ impl ModeViews {
         true
     }
 
+    pub(in crate::ui) fn active_rename_target(&self) -> Option<(gtk::Entry, bool)> {
+        self.active_rename
+            .borrow()
+            .as_ref()
+            .map(|active| (active.field.clone(), active.entry.is_directory()))
+    }
+
+    pub(in crate::ui) fn submit_rename(&self, field: &gtk::Entry) {
+        submit_mode_rename(&self.active_rename, &Rc::downgrade(&self.browser), field);
+    }
+
     pub fn cancel_rename(&self) -> bool {
         let Some(rename) = self.active_rename.take() else {
             return false;
         };
-        rename.label.set_visible(true);
-        rename.field.set_visible(false);
-        rename.field.set_sensitive(true);
+        finish_mode_rename(rename);
         true
+    }
+
+    pub(in crate::ui) fn clear_filter(&self, depth: usize) {
+        for pane in self
+            .icons_panes
+            .iter()
+            .chain(self.list_pane.iter())
+            .filter(|pane| pane.depth == depth)
+        {
+            if let Some(field) = pane.filter_entry.as_ref() {
+                field.set_text("");
+            }
+        }
     }
 
     pub fn begin_rename(&self, depth: usize, source_position: usize, entry: &FileEntry) -> bool {
@@ -649,12 +672,20 @@ impl ModeViews {
                 view_position_for_source(&pane.model, Some(&section.view_model), source_position)?;
             section.bound_items.borrow().iter().find_map(|bound| {
                 let item = bound.item.upgrade()?;
-                (item.position() == position).then(|| bound.widget.upgrade())?
+                (item.position() == position).then(|| {
+                    bound
+                        .widget
+                        .upgrade()
+                        .map(|widget| (widget, section.view.clone(), position))
+                })?
             })
         });
-        let Some(widget) = widget else {
+        let Some((widget, collection, position)) = widget else {
             return false;
         };
+        if !widget.is_mapped() || widget.width() <= 0 || pane.stack.is_transition_running() {
+            return false;
+        }
         let Some(label) = descendant_with_class(&widget, "alternate-rename-label") else {
             return false;
         };
@@ -670,28 +701,32 @@ impl ModeViews {
         let Some(field) = field else {
             return false;
         };
+        super::browser::prepare_collection_inline_edit(&collection, position);
         field.set_text(&entry.display_name);
         field.set_visible(true);
         label.set_visible(false);
-        let browser = Rc::downgrade(&self.browser);
-        let renamed_entry = entry.clone();
-        let active = self.active_rename.clone();
-        field.connect_activate(move |field| {
-            let name = field.text().to_string();
-            if name == renamed_entry.display_name {
-                if let Some(rename) = active.take() {
-                    rename.label.set_visible(true);
-                    rename.field.set_visible(false);
-                }
-            } else if let Some(browser) = browser.upgrade() {
-                field.set_sensitive(false);
-                browser.rename(renamed_entry.clone(), name);
-            }
-        });
+        install_mode_rename_handlers(
+            &field,
+            self.active_rename.clone(),
+            Rc::downgrade(&self.browser),
+        );
+        field.set_sensitive(true);
+        field.remove_css_class("error");
+        field.set_tooltip_text(None);
+        self.active_rename.replace(Some(ActiveModeRename {
+            entry: entry.clone(),
+            field: field.clone(),
+            label,
+        }));
         field.grab_focus();
-        field.select_region(0, super::browser::rename_stem_end(&entry.display_name));
-        self.active_rename
-            .replace(Some(ActiveModeRename { field, label }));
+        field.select_region(
+            0,
+            if entry.is_directory() {
+                -1
+            } else {
+                super::browser::rename_stem_end(&entry.display_name)
+            },
+        );
         true
     }
 
@@ -1047,10 +1082,22 @@ impl ModeViews {
                 self.focus_visible_pane(*depth);
             }
             BrowserEvent::RenameCompleted => {
-                self.cancel_rename();
+                if self
+                    .active_rename
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|active| !active.field.is_sensitive())
+                {
+                    self.cancel_rename();
+                }
             }
             BrowserEvent::RenameFailed { message } => {
-                if let Some(rename) = self.active_rename.borrow().as_ref() {
+                if let Some(rename) = self
+                    .active_rename
+                    .borrow()
+                    .as_ref()
+                    .filter(|active| !active.field.is_sensitive())
+                {
                     rename.field.set_sensitive(true);
                     rename.field.add_css_class("error");
                     rename.field.set_tooltip_text(Some(message));
@@ -1435,6 +1482,75 @@ struct ModeClickOptions {
     previews: Rc<Cell<bool>>,
     activation: Rc<Cell<ClickActivation>>,
     multiple_selection: Rc<Cell<bool>>,
+}
+
+fn finish_mode_rename(rename: ActiveModeRename) {
+    rename.label.set_visible(true);
+    rename.field.set_visible(false);
+    rename.field.set_sensitive(true);
+    rename.field.remove_css_class("error");
+    rename.field.set_tooltip_text(None);
+}
+
+fn submit_mode_rename(
+    active: &RefCell<Option<ActiveModeRename>>,
+    browser: &Weak<Browser>,
+    field: &gtk::Entry,
+) {
+    let entry = active
+        .borrow()
+        .as_ref()
+        .filter(|active| active.field == *field && field.is_sensitive())
+        .map(|active| active.entry.clone());
+    let Some(entry) = entry else { return };
+    let name = field.text().to_string();
+    if entry.is_directory() || name == entry.display_name {
+        if let Some(rename) = active.take() {
+            finish_mode_rename(rename);
+        }
+        if entry.is_directory()
+            && let Some(browser) = browser.upgrade()
+        {
+            super::browser::queue_folder_rename(&browser, entry, name);
+        }
+    } else if let Some(browser) = browser.upgrade() {
+        field.set_sensitive(false);
+        browser.rename(entry, name);
+    }
+}
+
+fn install_mode_rename_handlers(
+    field: &gtk::Entry,
+    active: Rc<RefCell<Option<ActiveModeRename>>>,
+    browser: Weak<Browser>,
+) {
+    if field.has_css_class("mode-rename-wired") {
+        return;
+    }
+    field.add_css_class("mode-rename-wired");
+    let active = Rc::downgrade(&active);
+    let submit_active = active.clone();
+    let submit_browser = browser.clone();
+    field.connect_activate(move |field| {
+        if let Some(active) = submit_active.upgrade() {
+            submit_mode_rename(&active, &submit_browser, field);
+        }
+    });
+    let focus = gtk::EventControllerFocus::new();
+    focus.connect_leave(move |controller| {
+        if let Some(active) = active.upgrade()
+            && let Some(field) = controller.widget().and_downcast::<gtk::Entry>()
+        {
+            let folder = active
+                .borrow()
+                .as_ref()
+                .is_some_and(|active| active.field == field && active.entry.is_directory());
+            if folder {
+                submit_mode_rename(&active, &browser, &field);
+            }
+        }
+    });
+    field.add_controller(focus);
 }
 
 fn install_icons_new_entry_handlers(

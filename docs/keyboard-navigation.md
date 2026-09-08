@@ -33,23 +33,29 @@ Background selection updates from directory loading must not move keyboard focus
 
 ## Creating files and folders
 
-In Columns, List, and Icons, **Ctrl+Shift+N** opens the New Folder name field;
-New File is available from the background context menu. Only **Enter** with a
-valid name creates the item. **Escape**, clicking outside the field (including
-empty pane space), or moving keyboard focus away cancels without creating it.
-Clicking inside the field keeps it open for editing.
+In Columns, List, and Icons, **Ctrl+Shift+N** or background menu → **New Folder**
+immediately creates `new folder`. If that name is occupied by any item, it tries
+`new folder (1)`, `new folder (2)`, and so on without overwriting anything.
+The pane filter is cleared and the entire folder name is selected for renaming:
+one Backspace clears it, and typing replaces it.
 
-Enter with an empty or whitespace-only name also cancels. Names containing `/`
-or NUL and the reserved names `.` and `..` are rejected; nonblank invalid names
-remain editable so they can be corrected. Whitespace-only includes Unicode
-whitespace. Valid names are used exactly as typed, including spaces around a
-nonblank name, hidden-file prefixes, and Unicode characters. Existing items
-are never overwritten by New File or New Folder; filesystem-specific limits
-and permission errors are reported by the operation.
+For **any folder rename**, including that new folder, Enter, clicking outside
+the field (even empty pane space), or moving keyboard focus away commits a valid
+name. Escape keeps the original name. Finishing with an empty or invalid name
+also keeps the original. Cancelling the initial rename does **not** delete the
+new folder: it remains under its allocated default name. Clicking inside the
+field continues editing; folder names containing dots are selected in full.
 
-Click-away cancellation: [Columns](screenshots/566/columns-click-away-cancel.png) ·
-[List](screenshots/566/list-click-away-cancel.png) ·
-[Icons](screenshots/566/icons-click-away-cancel.png).
+**New File** still requires Enter with a valid name before creating anything.
+Escape, outside clicks, or focus loss cancel it; empty/whitespace-only Enter
+also cancels, while other invalid names remain editable. Existing file-rename
+behavior, including extension-aware selection, is unchanged.
+
+Names containing `/` or NUL, `.`/`..`, and whitespace-only names (including
+Unicode whitespace) are invalid. Valid names are used exactly as typed,
+including spaces around a nonblank name, hidden-file prefixes, and Unicode.
+Name conflicts, filesystem-specific limits, and permission errors retain the
+original item and report an error.
 
 ## Shortcut footer
 

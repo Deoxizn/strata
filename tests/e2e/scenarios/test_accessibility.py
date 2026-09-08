@@ -104,7 +104,9 @@ def test_inline_fields_are_named(strata):
 
     strata.keyboard.press("ctrl+shift+n")
     field = strata.editable_field()
-    assert field.name == "New item name"
+    assert field.name == "Rename"
+    assert field.text == "new folder"
+    assert strata.fixture.path("new folder").is_dir()
     strata.keyboard.press("Escape")
 
 
