@@ -219,7 +219,7 @@ Check these interactions:
 - Single-selection requests remain single-selection with Ctrl/Shift clicks, including grouped List sections. Multiple-selection requests return all selected files.
 - Ctrl+L edits the location; Ctrl+F opens the browser filter; F5 refreshes; Ctrl+H or Ctrl+. toggles hidden files. Remote locations show an error.
 - Space opens/closes a preview. Escape dismisses a filter/menu/preview before cancelling the chooser.
-- Ctrl+Shift+N or the **New Folder** icon beside Refresh in the browser toolbar creates a directory inline. In folder requests, Ctrl+Enter accepts the current folder when the file view has focus.
+- Ctrl+Shift+N or the **New Folder** icon beside Refresh in the browser toolbar opens an inline name field. Enter with a valid name creates the directory; Escape, clicking outside the field (including empty space), or moving focus away cancels. Enter with an empty or whitespace-only name also cancels. In folder requests, Ctrl+Enter accepts the current folder when the file view has focus.
 - The SaveFile fixture suggests an existing filename. **Save** opens a themed overwrite confirmation; cancelling it leaves the chooser open. **Replace** returns the destination.
 - File filters and application choices share a compact row beneath the filename, wrapping on narrower windows, and preserve the selected values in the response. Ctrl+A in the filename entry selects the text, not browser files.
 

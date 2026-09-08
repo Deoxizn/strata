@@ -171,6 +171,25 @@ def test_something(strata):
     ...
 ```
 
+### Inline new-entry focus regressions
+
+`test_entry_management.py` covers new-file/folder click-away cancellation onto a
+file, folder, sidebar location, and empty space in all three views. It also
+covers keyboard focus loss, blank-name cancellation, invalid-name correction,
+clicking inside the field, exact valid names, existing-name protection, and
+cancel/reopen in an empty directory. Run it with:
+
+```bash
+./scripts/e2e.sh tests/e2e/scenarios/test_entry_management.py
+```
+
+Keep these as real XTEST pointer interactions: emitting a focus controller's
+`leave` signal in a Rust test checks cancellation, not GTK's in-flight focus walk
+(#566). List/Icons placeholder removal must wait until that walk returns. The
+cleanup identifies the original placeholder item, not the recyclable Entry
+widget, and reads the current listing before restoring the empty state. Rust
+unit tests cover these deferred-cleanup races separately.
+
 ### Accessible names are product surface
 
 The harness finds an entry because Strata names it. Those names live in

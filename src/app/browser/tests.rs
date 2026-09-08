@@ -33,19 +33,40 @@ fn deleted_trash_entries_refresh_the_trash_root() {
 
 #[test]
 fn invalid_new_folder_names_are_rejected_before_an_operation_starts() {
-    assert_invalid_creation_is_rejected(|browser| {
-        browser.create_directory(Location::local("/fixture"), "../escaped".to_owned());
-    });
+    for name in [
+        "../escaped",
+        "",
+        "   ",
+        "\u{00a0}\u{2003}",
+        ".",
+        "..",
+        "nul\0name",
+    ] {
+        assert_invalid_creation_is_rejected(name, |browser| {
+            browser.create_directory(Location::local("/fixture"), name.to_owned());
+        });
+    }
 }
 
 #[test]
 fn invalid_new_file_names_are_rejected_before_an_operation_starts() {
-    assert_invalid_creation_is_rejected(|browser| {
-        browser.create_file(Location::local("/fixture"), "../escaped".to_owned());
-    });
+    for name in [
+        "../escaped",
+        "",
+        "   ",
+        "\u{00a0}\u{2003}",
+        ".",
+        "..",
+        "nul\0name",
+    ] {
+        assert_invalid_creation_is_rejected(name, |browser| {
+            browser.create_file(Location::local("/fixture"), name.to_owned());
+        });
+    }
 }
 
-fn assert_invalid_creation_is_rejected(create: impl FnOnce(&Rc<Browser>)) {
+fn assert_invalid_creation_is_rejected(name: &str, create: impl FnOnce(&Rc<Browser>)) {
+    let expected = validate_basename(name).expect_err("invalid fixture name");
     let browser = Browser::new(Rc::new(FakeFileSource));
     let events = Rc::new(RefCell::new(Vec::new()));
     let observed = events.clone();
@@ -57,7 +78,7 @@ fn assert_invalid_creation_is_rejected(create: impl FnOnce(&Rc<Browser>)) {
     assert!(browser.operation_load.borrow().is_none());
     assert!(matches!(
         events.borrow().as_slice(),
-        [BrowserEvent::OperationFailed { message }] if message == "Names cannot contain /"
+        [BrowserEvent::OperationFailed { message }] if message == expected
     ));
 }
 

@@ -10,7 +10,7 @@ use crate::model::{FileEntry, Location};
 use super::LoadHandle;
 
 pub fn validate_basename(name: &str) -> Result<(), &'static str> {
-    if name.is_empty() {
+    if name.trim().is_empty() {
         Err("Enter a name")
     } else if name.contains('/') {
         Err("Names cannot contain /")

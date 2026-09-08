@@ -63,7 +63,46 @@ pub(in crate::ui) fn rename_stem_end(name: &str) -> i32 {
     name[..end].chars().count().min(i32::MAX as usize) as i32
 }
 
+impl super::BrowserView {
+    pub(in crate::ui) fn install_new_entry_dismissal(&self, root: &impl IsA<gtk::Widget>) {
+        let click = gtk::GestureClick::new();
+        click.set_button(0);
+        click.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = Rc::downgrade(&self.state);
+        click.connect_pressed(move |gesture, _, x, y| {
+            let Some(state) = weak.upgrade() else { return };
+            let field = state
+                .active_new_entry
+                .borrow()
+                .as_ref()
+                .map(|active| active.field.clone())
+                .or_else(|| state.mode_views.borrow().active_new_entry_field());
+            let Some(field) = field else { return };
+            let inside = gesture
+                .widget()
+                .and_then(|root| root.pick(x, y, gtk::PickFlags::DEFAULT))
+                .is_some_and(|target| target == field || target.is_ancestor(&field));
+            if !inside {
+                state.cancel_new_entry_for_field(&field);
+                state.mode_views.borrow().cancel_new_entry();
+            }
+        });
+        root.add_controller(click);
+    }
+}
+
 impl ViewState {
+    pub(super) fn cancel_new_entry_for_field(&self, field: &gtk::Entry) {
+        if self
+            .active_new_entry
+            .borrow()
+            .as_ref()
+            .is_some_and(|active| active.field == *field)
+        {
+            self.cancel_new_entry();
+        }
+    }
+
     pub(super) fn begin_new_entry(
         self: &Rc<Self>,
         depth: usize,
@@ -115,6 +154,10 @@ impl ViewState {
             return;
         }
         let name = field.text().to_string();
+        if name.trim().is_empty() {
+            self.cancel_new_entry();
+            return;
+        }
         if !update_basename_validation(field) {
             field.grab_focus();
             return;

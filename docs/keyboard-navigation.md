@@ -31,6 +31,26 @@ Copy/cut use the selection in the focused column, never a hovered row. In Column
 
 Background selection updates from directory loading must not move keyboard focus to an inactive column.
 
+## Creating files and folders
+
+In Columns, List, and Icons, **Ctrl+Shift+N** opens the New Folder name field;
+New File is available from the background context menu. Only **Enter** with a
+valid name creates the item. **Escape**, clicking outside the field (including
+empty pane space), or moving keyboard focus away cancels without creating it.
+Clicking inside the field keeps it open for editing.
+
+Enter with an empty or whitespace-only name also cancels. Names containing `/`
+or NUL and the reserved names `.` and `..` are rejected; nonblank invalid names
+remain editable so they can be corrected. Whitespace-only includes Unicode
+whitespace. Valid names are used exactly as typed, including spaces around a
+nonblank name, hidden-file prefixes, and Unicode characters. Existing items
+are never overwritten by New File or New Folder; filesystem-specific limits
+and permission errors are reported by the operation.
+
+Click-away cancellation: [Columns](screenshots/566/columns-click-away-cancel.png) ·
+[List](screenshots/566/list-click-away-cancel.png) ·
+[Icons](screenshots/566/icons-click-away-cancel.png).
+
 ## Shortcut footer
 
 Every mode has a compact, single-line footer with its navigation hints and common file shortcuts. **Settings → Keybindings → Show keybinding hints** controls its visibility (on by default). The preference is saved and updates all open windows immediately. F1 still opens the reference with hints disabled; closing it hides the footer again. The summary truncates rather than wrapping in narrow windows; **F1 · Shortcuts** always remains available to open the complete, mode-specific reference. F1 or Escape closes it. The reference blocks file-operation shortcuts while it is open.

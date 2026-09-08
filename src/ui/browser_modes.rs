@@ -538,7 +538,6 @@ impl ModeViews {
             .map(|rename| rename.field.clone())
     }
 
-    #[cfg(test)]
     pub(in crate::ui) fn active_new_entry_field(&self) -> Option<gtk::Entry> {
         self.active_new_entry
             .borrow()
@@ -1465,9 +1464,19 @@ fn install_icons_new_entry_handlers(
     let focus = gtk::EventControllerFocus::new();
     let field_for_leave = field.clone();
     focus.connect_leave(move |_| {
-        submit_mode_new_entry(&active, &browser, &location, &field_for_leave);
+        cancel_mode_new_entry_for_field(&active, &field_for_leave);
     });
     field.add_controller(focus);
+}
+
+fn cancel_mode_new_entry_for_field(
+    active: &RefCell<Option<ActiveModeNewEntry>>,
+    field: &gtk::Entry,
+) {
+    let cancelled = active.borrow_mut().take_if(|active| active.field == *field);
+    if let Some(active) = cancelled {
+        finish_mode_new_entry(&active);
+    }
 }
 
 fn submit_mode_new_entry(
@@ -1484,6 +1493,10 @@ fn submit_mode_new_entry(
         return;
     }
     let name = field.text().to_string();
+    if name.trim().is_empty() {
+        cancel_mode_new_entry_for_field(active, field);
+        return;
+    }
     if !super::browser::update_basename_validation(field) {
         field.grab_focus();
         return;
@@ -1506,29 +1519,34 @@ fn finish_mode_new_entry(active: &ActiveModeNewEntry) {
     active.field.remove_css_class("error");
     active.field.set_tooltip_text(None);
     active.view.remove_css_class("creating-entry");
-    // Removing the row is queued for the next idle instead of done here, because
-    // a click-away destroys the row while GTK is still walking an old focus
-    // pointer (see `synthesize_focus_change_events` in GtkWindow). Dropping the row
-    // inside that walk leaves GTK following a freed widget's parent chain to the
-    // window root forever, spinning the main thread.
-    if let (Some(placeholder), Some(stack)) = (active.placeholder.as_ref(), active.stack.as_ref()) {
-        let placeholder = placeholder.clone();
-        let stack = stack.downgrade();
-        let field = active.field.downgrade();
-        let show_status = active
-            .source_model
+    let Some(placeholder) = active.placeholder.as_ref() else {
+        return;
+    };
+    // Every opening inserts a fresh StringObject, even if the factory reuses the Entry.
+    let Some(prompt) = placeholder.item(0) else {
+        return;
+    };
+    let placeholder = placeholder.clone();
+    let stack = active
+        .stack
+        .as_ref()
+        .map(gtk::prelude::ObjectExt::downgrade);
+    let source_model = active.source_model.clone();
+    // Focus-leave runs inside GTK's parent-chain walk. Keep the row parented until
+    // that walk returns; removing it here can leave GTK spinning on a freed widget.
+    glib::idle_add_local_once(move || {
+        if placeholder.item(0).as_ref() != Some(&prompt) {
+            return;
+        }
+        placeholder.splice(0, placeholder.n_items(), &[]);
+        if source_model
             .as_ref()
-            .is_some_and(|model| model.n_items() == 0);
-        glib::idle_add_local_once(move || {
-            // A reopened prompt already replaced the row; its own row must stay.
-            if field.upgrade().is_some() {
-                placeholder.splice(0, placeholder.n_items(), &[]);
-                if show_status && let Some(stack) = stack.upgrade() {
-                    stack.set_visible_child_name("status");
-                }
-            }
-        });
-    }
+            .is_some_and(|model| model.n_items() == 0)
+            && let Some(stack) = stack.and_then(|stack| stack.upgrade())
+        {
+            stack.set_visible_child_name("status");
+        }
+    });
 }
 
 struct IconsControls {
@@ -2697,16 +2715,9 @@ fn build_list_pane(
         });
         let focus = gtk::EventControllerFocus::new();
         let active_for_leave = active_for_setup.clone();
-        let browser_for_leave = browser_for_setup.clone();
-        let location_for_leave = folder_location.clone();
         let field_for_leave = field.clone();
         focus.connect_leave(move |_| {
-            submit_mode_new_entry(
-                &active_for_leave,
-                &browser_for_leave,
-                &location_for_leave,
-                &field_for_leave,
-            );
+            cancel_mode_new_entry_for_field(&active_for_leave, &field_for_leave);
         });
         field.add_controller(focus);
         for (index, widget) in [

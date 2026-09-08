@@ -513,6 +513,7 @@ fn present_target(
     });
     window.add_controller(settings_shortcut);
     window.set_child(Some(&window_overlay));
+    browser.install_new_entry_dismissal(&window);
     let rename_cancel_view = browser.clone();
     let rename_cancel = gtk::GestureClick::new();
     rename_cancel.set_propagation_phase(gtk::PropagationPhase::Capture);

@@ -977,7 +977,7 @@ impl ViewState {
         let field = new_entry_entry.clone();
         new_entry_focus.connect_leave(move |_| {
             if let Some(state) = weak_state.upgrade() {
-                state.submit_new_entry(&field);
+                state.cancel_new_entry_for_field(&field);
             }
         });
         new_entry_entry.add_controller(new_entry_focus);

@@ -26,7 +26,178 @@ def test_create_folder_from_the_keyboard(strata, mode):
     strata.entry("new-folder")
 
 
-def test_creating_a_folder_can_be_cancelled(strata):
+@pytest.mark.parametrize("mode", ALL_MODES)
+@pytest.mark.parametrize("target", ["file", "folder", "sidebar", "background"])
+@pytest.mark.parametrize("kind", ["file", "folder"])
+def test_clicking_away_cancels_new_entries(strata, mode, target, kind):
+    strata.select_entry("readme.md")
+    if kind == "folder":
+        strata.keyboard.press("ctrl+shift+n")
+    else:
+        strata.pointer.right_click(strata.pane(), at=strata.background_point())
+        strata.choose_menu_item("New File")
+    field = strata.editable_field()
+    strata.keyboard.type_text("click-away-entry")
+    strata.wait(lambda: field.text == "click-away-entry", "the name to appear")
+
+    if target == "sidebar":
+        strata.pointer.click(strata.sidebar_button("Home"))
+    elif target == "background":
+        strata.pointer.click(strata.pane(), at=strata.background_point())
+    else:
+        strata.pointer.click(strata.entry("todo.txt" if target == "file" else "archive"))
+
+    strata.wait(
+        lambda: strata.window.find(role="text", states={"editable"}) is None,
+        "click-away to dismiss the new-entry field",
+    )
+    if target == "sidebar":
+        strata.wait_for_directory(strata.environment.home.name)
+        assert not (strata.environment.home / "click-away-entry").exists()
+    else:
+        strata.select_entry("readme.md")
+        strata.wait_for_selection(["readme.md"])
+    assert not strata.fixture.path("click-away-entry").exists()
+    assert "Gtk-CRITICAL" not in strata.application.log()
+
+
+@pytest.mark.parametrize("mode", ALL_MODES)
+@pytest.mark.parametrize("name", ["", "   ", "bad/name"])
+def test_clicking_away_does_not_submit_an_invalid_new_entry(strata, mode, name):
+    original = sorted(strata.fixture.names())
+    strata.select_entry("readme.md")
+    strata.keyboard.press("ctrl+shift+n")
+    field = strata.editable_field()
+    strata.keyboard.type_text(name)
+    strata.wait(lambda: field.text == name, "the invalid name to appear")
+    strata.pointer.click(strata.entry("todo.txt"))
+    strata.wait(
+        lambda: strata.window.find(role="text", states={"editable"}) is None,
+        "click-away to cancel the invalid prompt",
+    )
+    strata.select_entry("readme.md")
+    strata.wait_for_selection(["readme.md"])
+    assert sorted(strata.fixture.names()) == original
+    assert "Gtk-CRITICAL" not in strata.application.log()
+
+
+@pytest.mark.parametrize("mode", ALL_MODES)
+@pytest.mark.parametrize("name", ["", "   "])
+def test_enter_with_a_blank_new_entry_cancels(strata, mode, name):
+    original = strata.fixture.names()
+    strata.select_entry("readme.md")
+    strata.keyboard.press("ctrl+shift+n")
+    field = strata.editable_field()
+    strata.keyboard.type_text(name)
+    strata.wait(lambda: field.text == name, "the blank name to appear")
+    strata.keyboard.press("Return")
+    strata.wait(
+        lambda: strata.window.find(role="text", states={"editable"}) is None,
+        "Enter with a blank name to cancel",
+    )
+    strata.select_entry("readme.md")
+    strata.wait_for_selection(["readme.md"])
+    assert strata.fixture.names() == original
+
+
+@pytest.mark.parametrize("mode", ALL_MODES)
+@pytest.mark.parametrize("name", [".", "..", "bad/name", "/absolute"])
+def test_invalid_new_entry_names_can_be_corrected(strata, mode, name):
+    original = strata.fixture.names()
+    strata.select_entry("readme.md")
+    strata.keyboard.press("ctrl+shift+n")
+    field = strata.editable_field()
+    strata.keyboard.type_text(name)
+    strata.wait(lambda: field.text == name, "the invalid name to appear")
+    strata.keyboard.press("Return")
+    strata.wait(lambda: strata.editable_field().text == name, "the invalid name to remain editable")
+    assert strata.fixture.names() == original
+    strata.keyboard.press("ctrl+a")
+    strata.keyboard.type_text("corrected")
+    strata.keyboard.press("Return")
+    strata.wait(lambda: strata.fixture.path("corrected").is_dir(), "the corrected folder on disk")
+    strata.entry("corrected")
+
+
+@pytest.mark.parametrize("mode", ALL_MODES)
+@pytest.mark.parametrize("name", ["my notes", " padded ", ".hidden-folder", "-draft"])
+def test_clicking_inside_keeps_the_new_entry_and_preserves_its_name(strata, mode, name):
+    strata.select_entry("readme.md")
+    strata.keyboard.press("ctrl+shift+n")
+    field = strata.editable_field()
+    strata.keyboard.type_text(name)
+    strata.wait(lambda: field.text == name, "the name to appear")
+    strata.pointer.click(field)
+    strata.keyboard.press("Return")
+    strata.wait(lambda: strata.fixture.path(name).is_dir(), "the exact name on disk")
+    strata.wait(
+        lambda: strata.window.find(role="text", states={"editable"}) is None,
+        "the submitted prompt to close",
+    )
+
+
+@pytest.mark.parametrize("mode", ALL_MODES)
+def test_leaving_a_new_entry_with_tab_cancels(strata, mode):
+    strata.select_entry("readme.md")
+    strata.keyboard.press("ctrl+shift+n")
+    strata.editable_field()
+    strata.keyboard.type_text("discarded")
+    strata.keyboard.press("Tab")
+    strata.wait(
+        lambda: strata.window.find(role="text", states={"editable"}) is None,
+        "moving keyboard focus away to cancel the prompt",
+    )
+    strata.select_entry("readme.md")
+    strata.wait_for_selection(["readme.md"])
+    assert not strata.fixture.path("discarded").exists()
+    assert "Gtk-CRITICAL" not in strata.application.log()
+
+
+@pytest.mark.parametrize("mode", ALL_MODES)
+@pytest.mark.parametrize("kind,name", [("file", "todo.txt"), ("folder", "archive")])
+def test_creating_an_existing_name_does_not_overwrite(strata, mode, kind, name):
+    original = strata.fixture.listing()
+    strata.select_entry("readme.md")
+    if kind == "folder":
+        strata.keyboard.press("ctrl+shift+n")
+    else:
+        strata.pointer.right_click(strata.pane(), at=strata.background_point())
+        strata.choose_menu_item("New File")
+    field = strata.editable_field()
+    strata.keyboard.type_text(name)
+    strata.wait(lambda: field.text == name, "the existing name to appear")
+    strata.keyboard.press("Return")
+    dialog = strata.wait_for_dialog()
+    assert dialog.name == "Unable to complete operation"
+    strata.pointer.click(strata.dialog_button("Close"))
+    strata.wait(lambda: strata.dialog() is None, "the error to be dismissible")
+    assert strata.fixture.listing() == original
+    assert strata.fixture.path("todo.txt").read_text() == "todo\n"
+    strata.select_entry("readme.md")
+    strata.wait_for_selection(["readme.md"])
+
+
+@pytest.mark.parametrize("mode", ALL_MODES)
+def test_new_folder_can_be_reopened_in_an_empty_directory(strata, mode):
+    strata.open_directory("archive")
+    strata.keyboard.press("ctrl+shift+n")
+    strata.editable_field()
+    strata.keyboard.type_text("discarded")
+    strata.keyboard.press("Escape")
+    strata.wait(lambda: strata.is_empty("archive"), "the empty state to return")
+    strata.keyboard.press("ctrl+shift+n")
+    field = strata.editable_field()
+    strata.keyboard.type_text("kept")
+    strata.wait(lambda: field.text == "kept", "the replacement name to appear")
+    strata.keyboard.press("Return")
+    strata.wait(lambda: strata.fixture.path("archive/kept").is_dir(), "the folder on disk")
+    strata.entry("kept", directory="archive")
+    assert not strata.fixture.path("archive/discarded").exists()
+    assert "Gtk-CRITICAL" not in strata.application.log()
+
+
+@pytest.mark.parametrize("mode", ALL_MODES)
+def test_creating_a_folder_can_be_cancelled(strata, mode):
     fixture = strata.fixture
 
     strata.select_entry("readme.md")
