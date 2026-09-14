@@ -165,7 +165,11 @@ def test_new_item_uses_the_first_free_number_without_overwriting(strata):
     strata.fixture.path(base).write_text("keep\n")
     strata.fixture.path(base + " (1)").symlink_to("missing")
     strata.fixture.path(base + " (2)").mkdir()
-    strata.select_entry("readme.md")
+    strata.keyboard.press("F5")
+    for name in (base, base + " (1)", base + " (2)"):
+        strata.entry(name)
+    # Fixture insertions move rows; select by keyboard after the refreshed inventory.
+    strata.select_entry_with_keyboard("readme.md")
     field = start_creation(strata, "file")
     strata.wait(lambda: field.text == base + " (3)", "the first available numbered name")
     created = strata.fixture.path(base + " (3)")

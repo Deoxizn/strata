@@ -172,18 +172,19 @@ CI's **Quality build and lint** job runs formatting and Clippy, then compiles
 `cargo test --locked --all-targets --all-features --no-run` once. It exports only
 test executables and a plan, not Cargo caches. `scripts/quality_ci.py` collects
 each libtest inventory, including the explicitly ignored tests, and assigns every
-entry to one of four shards. Timing hints in `scripts/quality-durations.json`
+entry to one of two shards. Timing hints in `scripts/quality-durations.json`
 come from successful GTK child runs in
 [run 34560353003](https://github.com/lgse/strata/actions/runs/34560353003).
-Shard 0 is reserved exclusively for
-`ui::search::tests::deferred_scroll_restoration_yields_to_updates_wheel_scrollbar_and_query_reset`.
-Every other test is balanced longest-first across shards 1–3; unknown tests
-receive a one-second weight and always participate. Timing hints are not an
-allowlist and cannot put another test into shard 0. Validation rejects mixed
-assignments or a missing, duplicated, or ignored isolated test, so renaming or
-removing it requires updating `ISOLATED_TEST` and the reservation policy.
-The roughly 160-second deferred-scroll regression remains unchanged and limits
-the possible speedup; sharding does not shorten an individual test.
+Tests are balanced longest-first across both shards; unknown tests receive a
+one-second weight and always participate. Timing hints are not an allowlist.
+The deferred-scroll timing was refreshed to 1.32 seconds from
+[run 34811363582](https://github.com/lgse/strata/actions/runs/34811363582).
+`ui::search::tests::deferred_scroll_restoration_yields_to_updates_wheel_scrollbar_and_query_reset`
+runs in its own libtest process before the other tests assigned to its shard,
+not on a dedicated runner. Each process must pass its complete selection before
+an aggregate shard receipt is written. Validation rejects a missing, duplicated,
+or ignored isolated test; renaming or removing it requires updating `ISOLATED_TEST`.
+Sharding does not shorten an individual test.
 
 Each **Rust tests shard N** verifies the checkout revision, application/Rust-test source
 fingerprint, image inputs, executable checksums, and the entire libtest inventory
@@ -207,7 +208,7 @@ To reproduce the handoff locally using the same pinned container:
 
 ```bash
 STRATA_QUALITY_TASK=build ./scripts/quality.sh test
-for shard in 0 1 2 3; do
+for shard in 0 1; do
   STRATA_QUALITY_TASK=shard STRATA_QUALITY_SHARD="$shard" ./scripts/quality.sh test
 done
 python3 scripts/quality_ci.py verify
@@ -217,7 +218,7 @@ The example runs shards sequentially for convenient local diagnosis; CI runs the
 in parallel on separate runners. These environment variables are CI handoff modes,
 not test filters; ordinary `./scripts/quality.sh test` still runs the complete
 unsharded suite. Rebuild the bundle after changing source or checkout revision.
-The four-shard matrix and `SHARDS` constant must be updated together if tuning
+The two-shard matrix and `SHARDS` constant must be updated together if tuning
 fan-out. Each shard has a ten-minute hang bound; timing is otherwise informational.
 
 ### Hardware-aware parallelism
@@ -509,17 +510,18 @@ for a workflow that does not have a mutation yet.
 
 The matrix is generated from `harness/sharding.py`, not a fixed runner count or
 file list. Tests are scheduled longest-first using committed setup+call+teardown
-CI measurements from `tests/e2e/durations.json`, with 25% headroom and a 90-second
-soft target per worker (two workers per runner). New tests automatically receive a
-conservative five-second weight. More tests or longer measured durations add runners
-up to a maximum of eight shards, reducing duplicated runtime setup and bounding
+CI measurements from `tests/e2e/durations.json`, with 25% headroom and a 180-second
+soft target per worker (two workers per runner). This leaves room for runner setup
+within an approximately three-to-four-minute shard job; actual timings may vary.
+New tests automatically receive a conservative five-second weight. More tests or longer measured durations add runners
+up to a maximum of three shards, reducing duplicated runtime setup and bounding
 fan-out. At the cap, shards run longer rather than failing planning or dropping tests.
 Baselines stay in one serial scheduling group, even when that group exceeds the soft
 target. Estimated time alone never fails the gate; hang-protection timeouts still apply.
 Tune `TARGET_SECONDS` and `MAX_SHARDS` in `tests/e2e/harness/sharding.py` manually as
 runtime and cost needs change. The shard cap is not a spending cap: longer runs still
 consume more runner-minutes. There is no `max-parallel` throttle; the runner provider
-must have enough concurrent capacity for up to eight shards. Runner queues affect
+must have enough concurrent capacity for up to three shards. Runner queues affect
 reported timing, not test correctness.
 
 Shards validate their entire collection against the plan before selecting tests.
