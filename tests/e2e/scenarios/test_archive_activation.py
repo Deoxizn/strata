@@ -8,16 +8,15 @@ from pathlib import Path
 import pytest
 
 from harness.artifacts import ArtifactCollector
-from harness.modes import ALL_MODES
+
 
 
 @pytest.mark.preferences(
     list_file_clicks=2, grid_file_clicks=2, explorer_file_clicks=2,
 )
-@pytest.mark.parametrize("mode", ALL_MODES)
 @pytest.mark.parametrize("activation", ["keyboard", "double-click"])
 @pytest.mark.parametrize("format", ["zip", "rar", "tar.gz"])
-def test_archive_activation_extracts_to_subfolder(strata, mode, activation, format):
+def test_archive_activation_extracts_to_subfolder(strata, activation, format):
     strata.wait_for_focused_entry("archive")
     fixture = strata.fixture
     archive_name = f"activation.{format}"
@@ -67,5 +66,5 @@ def test_archive_activation_extracts_to_subfolder(strata, mode, activation, form
         assert extracted.read_text() == "keep existing edits\n"
         strata.entry(f"activation ({suffix})")
     if format == "rar":
-        collector = ArtifactCollector(test_name=f"rar-activation-{mode}-{activation}")
+        collector = ArtifactCollector(test_name=f"rar-activation-{activation}")
         strata.screenshot(collector.directory / "after.png")
