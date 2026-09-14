@@ -26,7 +26,7 @@ def _cases_for_modes(modes, kind, new, target):
     ]
 
 
-# Enter and sidebar have extra postconditions. The four click-aways share
+# Enter and sidebar have extra postconditions. The four click-away targets share
 # disk + editor-closed asserts, so they run in Columns + List on one lifecycle.
 VALID_NAME_COMMIT_CASES = [
     case
