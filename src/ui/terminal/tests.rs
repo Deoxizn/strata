@@ -29,21 +29,30 @@ fn resolve_only(names: &[&str]) -> Terminal {
 fn the_preferred_launcher_wins_when_it_is_installed() {
     let terminal = resolve_only(&["kitty", PREFERRED_LAUNCHER]);
 
-    assert_eq!(terminal.program(), OsStr::new(PREFERRED_LAUNCHER));
+    assert_eq!(
+        Path::new(terminal.program()).file_name(),
+        Some(OsStr::new(PREFERRED_LAUNCHER))
+    );
 }
 
 #[test]
 fn resolution_falls_back_to_an_installed_emulator() {
     let terminal = resolve_only(&["kitty"]);
 
-    assert_eq!(terminal.program(), OsStr::new("kitty"));
+    assert_eq!(
+        Path::new(terminal.program()).file_name(),
+        Some(OsStr::new("kitty"))
+    );
 }
 
 #[test]
 fn resolution_reports_no_terminal_when_nothing_is_installed() {
     let dir = bin_dir(&[]);
 
-    assert_eq!(Terminal::resolve_with(path_var(&dir).as_deref(), None), None);
+    assert_eq!(
+        Terminal::resolve_with(path_var(&dir).as_deref(), None),
+        None
+    );
     assert!(
         no_terminal_message().contains(PREFERRED_LAUNCHER),
         "the guidance should name the preferred launcher"
@@ -53,11 +62,8 @@ fn resolution_reports_no_terminal_when_nothing_is_installed() {
 #[test]
 fn an_explicit_terminal_takes_priority_over_the_path() {
     let dir = bin_dir(&[PREFERRED_LAUNCHER]);
-    let terminal = Terminal::resolve_with(
-        path_var(&dir).as_deref(),
-        Some(OsStr::new("my-term")),
-    )
-    .expect("explicit terminal resolves");
+    let terminal = Terminal::resolve_with(path_var(&dir).as_deref(), Some(OsStr::new("my-term")))
+        .expect("explicit terminal resolves");
 
     assert_eq!(terminal.program(), OsStr::new("my-term"));
 }
@@ -68,8 +74,14 @@ fn an_explicit_terminal_keeps_known_emulator_flags() {
         .expect("explicit terminal resolves");
     let command = terminal.directory_command(Path::new("/tmp/work"));
 
-    assert_eq!(terminal.program(), OsStr::new("kitty"));
-    assert_eq!(command.get_args().collect::<Vec<_>>(), ["--working-directory", "/tmp/work"]);
+    assert_eq!(
+        Path::new(terminal.program()).file_name(),
+        Some(OsStr::new("kitty"))
+    );
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        ["--working-directory", "/tmp/work"]
+    );
 }
 
 #[test]
@@ -122,6 +134,8 @@ fn exec_commands_use_per_terminal_separators() {
         ("kitty", &["--", "paru", "-Syu", "strata-bin"]),
         ("konsole", &["-e", "paru", "-Syu", "strata-bin"]),
         ("foot", &["paru", "-Syu", "strata-bin"]),
+        ("xfce4-terminal", &["-x", "paru", "-Syu", "strata-bin"]),
+        ("terminator", &["-x", "paru", "-Syu", "strata-bin"]),
     ];
     for (program, expected) in cases.iter().copied() {
         let terminal = resolve_only(&[program]);
@@ -151,11 +165,50 @@ fn other_launch_failures_name_the_terminal_and_keep_the_cause() {
     let message = terminal.launch_failure(&error);
 
     assert!(
-        message.starts_with("Terminal “kitty” could not be started: "),
+        message.starts_with(&format!(
+            "Terminal “{}” could not be started: ",
+            terminal.program().to_string_lossy()
+        )),
         "unexpected message: {message}"
     );
     assert!(
         message.ends_with(&error.to_string()),
         "the cause is dropped: {message}"
     );
+}
+
+#[test]
+fn explicit_wezterm_preserves_subcommand_and_quoted_arguments() {
+    let terminal =
+        Terminal::resolve_with(None, Some(OsStr::new("wezterm --class 'Strata update'")))
+            .expect("explicit terminal resolves");
+    assert_eq!(
+        terminal
+            .exec_command(&["paru", "-Syu", "strata-bin"])
+            .get_args()
+            .collect::<Vec<_>>(),
+        [
+            "start",
+            "--class",
+            "Strata update",
+            "--",
+            "paru",
+            "-Syu",
+            "strata-bin"
+        ]
+    );
+}
+
+#[test]
+fn resolved_launcher_still_runs_after_changing_directory() {
+    let dir = bin_dir(&["kitty"]);
+    let destination = tempfile::tempdir().expect("destination");
+    let terminal =
+        Terminal::resolve_with(path_var(&dir).as_deref(), None).expect("terminal resolves");
+    let status = terminal
+        .directory_command(destination.path())
+        .env("PATH", "")
+        .status()
+        .expect("launch resolved executable");
+    assert!(status.success());
 }

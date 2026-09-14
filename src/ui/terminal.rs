@@ -5,9 +5,6 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-/// Preferred launcher. Omarchy ships `xdg-terminal-exec` with a configured
-/// `xdg-terminals.list`, but CachyOS and vanilla Arch do not (AUR-only), so
-/// this is only the first probe in [`Terminal::resolve`], never assumed.
 pub(super) const PREFERRED_LAUNCHER: &str = "xdg-terminal-exec";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,7 +17,7 @@ enum DirectoryStyle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExecStyle {
     Separator,
-    Flag,
+    Flag(&'static str),
     Direct,
 }
 
@@ -43,7 +40,7 @@ const KNOWN_TERMINALS: &[KnownTerminal] = &[
         program: "konsole",
         leading: &[],
         directory: DirectoryStyle::Separate("--workdir"),
-        exec: ExecStyle::Flag,
+        exec: ExecStyle::Flag("-e"),
     },
     KnownTerminal {
         program: "gnome-terminal",
@@ -55,7 +52,7 @@ const KNOWN_TERMINALS: &[KnownTerminal] = &[
         program: "xfce4-terminal",
         leading: &[],
         directory: DirectoryStyle::Separate("--working-directory"),
-        exec: ExecStyle::Flag,
+        exec: ExecStyle::Flag("-x"),
     },
     KnownTerminal {
         program: "kitty",
@@ -67,16 +64,14 @@ const KNOWN_TERMINALS: &[KnownTerminal] = &[
         program: "ghostty",
         leading: &[],
         directory: DirectoryStyle::Joined("--working-directory="),
-        exec: ExecStyle::Flag,
+        exec: ExecStyle::Flag("-e"),
     },
     KnownTerminal {
         program: "alacritty",
         leading: &[],
         directory: DirectoryStyle::Separate("--working-directory"),
-        exec: ExecStyle::Flag,
+        exec: ExecStyle::Flag("-e"),
     },
-    // Foot ignores `-e` for xterm compatibility and runs trailing
-    // arguments as the command, so the command must stay direct.
     KnownTerminal {
         program: "foot",
         leading: &[],
@@ -93,19 +88,19 @@ const KNOWN_TERMINALS: &[KnownTerminal] = &[
         program: "tilix",
         leading: &[],
         directory: DirectoryStyle::Separate("--working-directory"),
-        exec: ExecStyle::Flag,
+        exec: ExecStyle::Flag("-e"),
     },
     KnownTerminal {
         program: "terminator",
         leading: &[],
         directory: DirectoryStyle::Separate("--working-directory"),
-        exec: ExecStyle::Flag,
+        exec: ExecStyle::Flag("-x"),
     },
     KnownTerminal {
         program: "xterm",
         leading: &[],
         directory: DirectoryStyle::Inherited,
-        exec: ExecStyle::Flag,
+        exec: ExecStyle::Flag("-e"),
     },
 ];
 
@@ -129,7 +124,7 @@ impl Terminal {
         path_var: Option<&OsStr>,
         terminal_var: Option<&OsStr>,
     ) -> Option<Terminal> {
-        if let Some(explicit) = explicit_terminal(terminal_var) {
+        if let Some(explicit) = explicit_terminal(path_var, terminal_var) {
             return Some(explicit);
         }
         KNOWN_TERMINALS.iter().find_map(|known| {
@@ -183,8 +178,8 @@ impl Terminal {
             ExecStyle::Separator => {
                 command.arg("--");
             }
-            ExecStyle::Flag => {
-                command.arg("-e");
+            ExecStyle::Flag(flag) => {
+                command.arg(flag);
             }
             ExecStyle::Direct => {}
         }
@@ -213,26 +208,37 @@ pub(super) fn no_terminal_message() -> String {
     )
 }
 
-fn explicit_terminal(terminal_var: Option<&OsStr>) -> Option<Terminal> {
+fn explicit_terminal(path_var: Option<&OsStr>, terminal_var: Option<&OsStr>) -> Option<Terminal> {
     let text = terminal_var.and_then(OsStr::to_str)?;
-    let mut words = text.split_whitespace();
+    let mut words = glib::shell_parse_argv(text).ok()?.into_iter();
     let program = words.next()?;
-    let file_name = Path::new(program)
-        .file_name()
-        .and_then(OsStr::to_str)
-        .unwrap_or(program);
-    let known = KNOWN_TERMINALS.iter().find(|known| known.program == file_name);
+    let file_name = Path::new(&program).file_name()?.to_str()?;
+    let known = KNOWN_TERMINALS
+        .iter()
+        .find(|known| known.program == file_name);
+    let leading = known
+        .into_iter()
+        .flat_map(|known| known.leading.iter().map(OsString::from))
+        .chain(words)
+        .collect();
     Some(Terminal {
-        program: OsString::from(program),
-        leading: words.map(OsString::from).collect(),
-        directory: known.map(|known| known.directory).unwrap_or(DirectoryStyle::Inherited),
-        exec: known.map(|known| known.exec).unwrap_or(ExecStyle::Flag),
+        program: find_on_path(path_var, program.to_str()?).unwrap_or(program),
+        leading,
+        directory: known
+            .map(|known| known.directory)
+            .unwrap_or(DirectoryStyle::Inherited),
+        exec: known
+            .map(|known| known.exec)
+            .unwrap_or(ExecStyle::Flag("-e")),
     })
 }
 
 fn find_on_path(path_var: Option<&OsStr>, program: &str) -> Option<OsString> {
     if program.contains('/') {
-        return is_executable(Path::new(program)).then(|| OsString::from(program));
+        return is_executable(Path::new(program))
+            .then(|| std::path::absolute(program).ok())
+            .flatten()
+            .map(|path| path.into_os_string());
     }
     let path_var = path_var?;
     for dir in std::env::split_paths(path_var) {
@@ -240,7 +246,9 @@ fn find_on_path(path_var: Option<&OsStr>, program: &str) -> Option<OsString> {
             continue;
         }
         if is_executable(&dir.join(program)) {
-            return Some(OsString::from(program));
+            return std::path::absolute(dir.join(program))
+                .ok()
+                .map(|path| path.into_os_string());
         }
     }
     None
