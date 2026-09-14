@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
+import io
 import shutil
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -14,7 +16,7 @@ from harness.modes import ALL_MODES
 )
 @pytest.mark.parametrize("mode", ALL_MODES)
 @pytest.mark.parametrize("activation", ["keyboard", "double-click"])
-@pytest.mark.parametrize("format", ["zip", "rar"])
+@pytest.mark.parametrize("format", ["zip", "rar", "tar.gz"])
 def test_archive_activation_extracts_to_subfolder(strata, mode, activation, format):
     strata.wait_for_focused_entry("archive")
     fixture = strata.fixture
@@ -23,6 +25,12 @@ def test_archive_activation_extracts_to_subfolder(strata, mode, activation, form
         with zipfile.ZipFile(fixture.path(archive_name), "w") as archive:
             archive.writestr("activated.txt", "extracted by activation\n")
         member, contents = "activated.txt", "extracted by activation\n"
+    elif format == "tar.gz":
+        member, contents = "activated.txt", "extracted by activation\n"
+        with tarfile.open(fixture.path(archive_name), "w:gz") as archive:
+            info = tarfile.TarInfo(member)
+            info.size = len(contents.encode())
+            archive.addfile(info, io.BytesIO(contents.encode()))
     else:
         shutil.copyfile(Path(__file__).parents[2] / "fixtures/rar/version.rar", fixture.path(archive_name))
         member, contents = "VERSION", "unrar-0.4.0"
@@ -44,6 +52,20 @@ def test_archive_activation_extracts_to_subfolder(strata, mode, activation, form
     assert fixture.path(archive_name).exists()
     assert strata.pane().name == fixture.root.name
     strata.entry("activation")
+    extracted.write_text("keep existing edits\n")
+    for suffix in [1, 2]:
+        if activation == "keyboard":
+            strata.select_entry("todo.txt")
+            strata.select_entry_with_keyboard(archive_name)
+            strata.keyboard.press("Return")
+        else:
+            strata.double_click_entry(archive_name)
+        fresh = fixture.path(f"activation ({suffix})") / member
+        strata.wait(lambda: fresh.exists(), "repeated activation to use a fresh folder")
+        strata.wait(lambda: strata.dialog() is None, "extraction progress dismissal")
+        assert fresh.read_text() == contents
+        assert extracted.read_text() == "keep existing edits\n"
+        strata.entry(f"activation ({suffix})")
     if format == "rar":
         collector = ArtifactCollector(test_name=f"rar-activation-{mode}-{activation}")
         strata.screenshot(collector.directory / "after.png")
