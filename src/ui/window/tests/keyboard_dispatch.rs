@@ -27,6 +27,8 @@ impl KeyboardFixture {
     fn with_provider(provider: Rc<dyn crate::services::PreviewProvider>) -> Self {
         ThemeManager::seed_saved_preferences_for_test();
         let preferences = ThemeManager::shared();
+        // Keyboard focus-return scenarios need a place to focus; the saved fixture hides all places.
+        preferences.set_sidebar_show_home(true);
         let directory = tempfile::tempdir().expect("fixture");
         for name in ["a.txt", "b.txt", "c.txt"] {
             std::fs::write(directory.path().join(name), b"preview").expect("fixture file");
