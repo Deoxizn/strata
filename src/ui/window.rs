@@ -903,6 +903,7 @@ pub(super) struct SidebarState {
     mount_monitor: gio_unix::MountMonitor,
     theme_manager: Rc<super::theme::ThemeManager>,
     place_order: RefCell<Vec<&'static str>>,
+    places_visibility: RefCell<[bool; 8]>,
     pinned_places: Rc<RefCell<Vec<(Location, String)>>>,
     place_rows: RefCell<Vec<(Location, gtk::Button)>>,
     trash_contents: Cell<TrashContents>,
@@ -1066,26 +1067,56 @@ impl SidebarState {
     }
 
     fn append_static_places(self: &Rc<Self>) {
-        self.append_place(
-            crate::assets::icons::HOME,
-            "Home",
-            Location::local(home_directory()),
-        );
-        if !self.local_only {
-            self.append_trash_place();
+        if self.theme_manager.sidebar_show_home() {
             self.append_place(
-                crate::assets::icons::NETWORK,
-                "Network",
-                Location::uri("network:///"),
+                crate::assets::icons::HOME,
+                "Home",
+                Location::local(home_directory()),
             );
         }
-        self.append_separator();
+        if !self.local_only {
+            if self.theme_manager.sidebar_show_trash() {
+                self.append_trash_place();
+            }
+            if self.theme_manager.sidebar_show_network() {
+                self.append_place(
+                    crate::assets::icons::NETWORK,
+                    "Network",
+                    Location::uri("network:///"),
+                );
+            }
+        }
+        if self.has_visible_standard_places() && self.widget.first_child().is_some() {
+            self.append_separator();
+        }
         self.append_standard_places();
         self.append_pinned_places();
     }
 
+    fn has_visible_standard_places(&self) -> bool {
+        self.place_order
+            .borrow()
+            .iter()
+            .copied()
+            .any(|place| {
+                self.standard_place_visible(place)
+                    && standard_place(place).is_some_and(|(_, _, directory)| {
+                        glib::user_special_dir(directory).is_some_and(|path| {
+                            should_show_standard_place(place, &path, &home_directory())
+                        })
+                    })
+            })
+    }
+
+    fn standard_place_visible(&self, id: &str) -> bool {
+        sidebar_standard_place_visible(&self.theme_manager, id)
+    }
+
     fn append_standard_places(self: &Rc<Self>) {
         for place in self.place_order.borrow().clone() {
+            if !self.standard_place_visible(place) {
+                continue;
+            }
             if let Some((icon, name, directory)) = standard_place(place)
                 && let Some(path) = glib::user_special_dir(directory)
                     .filter(|path| should_show_standard_place(place, path, &home_directory()))
@@ -1110,7 +1141,9 @@ impl SidebarState {
             .map(|(index, (location, name))| (index, location.clone(), name.clone()))
             .collect::<Vec<_>>();
         if !pinned.is_empty() {
-            self.append_separator();
+            if self.widget.first_child().is_some() {
+                self.append_separator();
+            }
             self.append_heading("PINNED");
             for (index, location, name) in pinned {
                 if self.local_only {
@@ -1130,7 +1163,9 @@ impl SidebarState {
         if volumes.is_empty() && mounts.is_empty() && password_drives.is_empty() {
             return;
         }
-        self.append_separator();
+        if self.widget.first_child().is_some() {
+            self.append_separator();
+        }
         self.append_heading("DEVICES");
         for volume in volumes {
             self.append_volume(volume);
@@ -2743,6 +2778,20 @@ fn is_standard_place_location(location: &Location) -> bool {
 
 fn should_show_standard_place(id: &str, path: &std::path::Path, home: &std::path::Path) -> bool {
     id != "desktop" || path != home
+}
+
+fn sidebar_standard_place_visible(
+    manager: &super::theme::ThemeManager,
+    id: &str,
+) -> bool {
+    match id {
+        "desktop" => manager.sidebar_show_desktop(),
+        "documents" => manager.sidebar_show_documents(),
+        "downloads" => manager.sidebar_show_downloads(),
+        "pictures" => manager.sidebar_show_pictures(),
+        "videos" => manager.sidebar_show_videos(),
+        _ => true,
+    }
 }
 
 fn resolve_place_order(persisted: &[String]) -> Vec<&'static str> {

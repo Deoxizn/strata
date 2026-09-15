@@ -2,7 +2,10 @@
 
 use std::time::{Duration, Instant};
 
-use super::super::{browser_for_window, home_directory, save_pinned_places, sidebar_button};
+use super::super::{
+    browser_for_window, home_directory, save_pinned_places, should_show_standard_place,
+    sidebar_button, standard_place,
+};
 use super::*;
 use crate::{
     services::{DirectoryEvent, DirectoryRequest, FileSource, LoadHandle, LocationValidationError},
@@ -332,4 +335,101 @@ fn wait_until(condition: impl Fn() -> bool) {
         glib::MainContext::default().iteration(false);
         std::thread::sleep(Duration::from_millis(2));
     }
+}
+
+fn has_location(sidebar: &SidebarView, location: &Location) -> bool {
+    sidebar
+        .state
+        .place_rows
+        .borrow()
+        .iter()
+        .any(|(candidate, _)| candidate == location)
+}
+
+fn standard_location(id: &str) -> Option<Location> {
+    let (_, _, directory) = standard_place(id)?;
+    let path = glib::user_special_dir(directory)?;
+    if !should_show_standard_place(id, &path, &home_directory()) {
+        return None;
+    }
+    Some(Location::local(path))
+}
+
+#[test]
+fn sidebar_visibility_prefs_hide_and_restore_default_places_across_windows() {
+    gtk_test(
+        "ui::window::sidebar::tests::sidebar_visibility_prefs_hide_and_restore_default_places_across_windows",
+        || {
+            ThemeManager::seed_saved_preferences_for_test();
+            let manager = ThemeManager::shared();
+            assert_eq!(
+                manager.sidebar_places_visibility(),
+                [false, false, false, false, false, false, false, false]
+            );
+            let sidebars = [
+                build_sidebar(browser_for_window(), manager.clone(), false),
+                build_sidebar(browser_for_window(), manager.clone(), false),
+            ];
+            let home = Location::local(home_directory());
+            let trash = Location::uri("trash:///");
+            let network = Location::uri("network:///");
+            let standard_ids = ["desktop", "documents", "downloads", "pictures", "videos"];
+            let standards: Vec<(&str, Location)> = standard_ids
+                .into_iter()
+                .filter_map(|id| standard_location(id).map(|location| (id, location)))
+                .collect();
+            for sidebar in &sidebars {
+                assert!(!has_location(sidebar, &home));
+                assert!(!has_location(sidebar, &trash));
+                assert!(!has_location(sidebar, &network));
+                for (_, location) in &standards {
+                    assert!(!has_location(sidebar, location));
+                }
+            }
+            manager.set_sidebar_show_home(true);
+            manager.set_sidebar_show_trash(true);
+            manager.set_sidebar_show_network(true);
+            manager.set_sidebar_show_desktop(true);
+            manager.set_sidebar_show_documents(true);
+            manager.set_sidebar_show_downloads(true);
+            manager.set_sidebar_show_pictures(true);
+            manager.set_sidebar_show_videos(true);
+            for sidebar in &sidebars {
+                assert!(has_location(sidebar, &home));
+                assert!(has_location(sidebar, &trash));
+                assert!(has_location(sidebar, &network));
+                for (_, location) in &standards {
+                    assert!(has_location(sidebar, location));
+                }
+            }
+            let chooser = build_sidebar(browser_for_window(), manager.clone(), true);
+            assert!(has_location(&chooser, &home));
+            assert!(!has_location(&chooser, &trash));
+            assert!(!has_location(&chooser, &network));
+            manager.set_sidebar_show_home(false);
+            manager.set_sidebar_show_trash(false);
+            manager.set_sidebar_show_network(false);
+            manager.set_sidebar_show_desktop(false);
+            manager.set_sidebar_show_documents(false);
+            manager.set_sidebar_show_downloads(false);
+            manager.set_sidebar_show_pictures(false);
+            manager.set_sidebar_show_videos(false);
+            for sidebar in sidebars.iter().chain(std::iter::once(&chooser)) {
+                assert!(!has_location(sidebar, &home));
+                for (_, location) in &standards {
+                    assert!(!has_location(sidebar, location));
+                }
+            }
+            for sidebar in &sidebars {
+                assert!(!has_location(sidebar, &trash));
+                assert!(!has_location(sidebar, &network));
+            }
+            for sidebar in sidebars {
+                sidebar.disconnect();
+                sidebar.state.browser.clear_observer();
+            }
+            chooser.disconnect();
+            chooser.state.browser.clear_observer();
+        },
+    );
 }
