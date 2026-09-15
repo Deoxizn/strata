@@ -55,11 +55,11 @@ mod transfer;
 mod trash;
 
 pub(in crate::ui) use crate::ui::browser::clipboard::drag_icon_with_count;
-pub(super) use crate::ui::browser::clipboard::file_drag_content;
 pub(crate) use crate::ui::browser::clipboard::{
     PreparedFileDrop, drag_actions_for_modifiers, file_drop_action, file_drop_commit,
     locations_from_file_list_value, prepare_file_drop_target,
 };
+pub(super) use crate::ui::browser::clipboard::{file_drag_content, set_cut_result_style};
 pub(crate) use crate::ui::browser::collection::{
     ActivePaneFilter, activate_recursive_search_result, bind_filter_query, debounce_filter_entry,
     detach_collection_view, focus_collection_item_when_allocated, focus_filter_entry,
@@ -1215,8 +1215,10 @@ impl BrowserView {
     }
 
     pub fn copy_selection(&self) -> bool {
-        self.state.sync_mode_selection();
-        let entries = self.state.browser.selected_entries();
+        let entries = self.selected_search_results().unwrap_or_else(|| {
+            self.state.sync_mode_selection();
+            self.state.browser.selected_entries()
+        });
         if entries.is_empty() {
             return false;
         }
@@ -1235,8 +1237,10 @@ impl BrowserView {
     }
 
     pub fn cut_selection(&self) -> bool {
-        self.state.sync_mode_selection();
-        let entries = self.state.browser.selected_entries();
+        let entries = self.selected_search_results().unwrap_or_else(|| {
+            self.state.sync_mode_selection();
+            self.state.browser.selected_entries()
+        });
         if entries.is_empty() {
             return false;
         }
@@ -1286,7 +1290,9 @@ impl BrowserView {
             {
                 self.state.select_all(depth);
             }
-        } else if let Some(depth) = self.state.browser.active_depth() {
+        } else if !self.state.mode_views.borrow().select_all_search_results()
+            && let Some(depth) = self.state.browser.active_depth()
+        {
             self.state.browser.select_all(depth);
         }
     }

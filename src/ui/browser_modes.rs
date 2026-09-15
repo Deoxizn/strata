@@ -787,6 +787,11 @@ impl ModeViews {
             .is_some_and(|pane| pane.search.focus_result(path))
     }
 
+    pub fn select_all_search_results(&self) -> bool {
+        self.single_pane()
+            .is_some_and(|pane| pane.search.select_all())
+    }
+
     pub fn selected_search_results(&self) -> Option<Vec<FileEntry>> {
         self.single_pane()?.search.selected_entries()
     }
@@ -3857,6 +3862,7 @@ fn set_mode_cut_style(widget: &impl IsA<gtk::Widget>, cut: bool) {
 }
 
 fn refresh_cut_pane(pane: &Pane, browser: &Browser, cuts: &[Location]) {
+    pane.search.refresh_cut_rows();
     for section in pane.item_sections() {
         section.bound_items.borrow_mut().retain(|bound| {
             let (Some(item), Some(widget)) = (bound.item.upgrade(), bound.widget.upgrade()) else {

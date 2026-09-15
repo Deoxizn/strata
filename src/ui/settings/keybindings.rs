@@ -78,7 +78,7 @@ pub(super) fn keybindings_page(manager: Rc<ThemeManager>) -> gtk::Widget {
     let hints = super::settings_group(&content, "HINTS");
     let (row, toggle) = settings_option(
         "Show keybinding hints",
-        "Show navigation and paste hints at the bottom of every view. F1 always opens the full reference.",
+        "Show navigation hints and the shortcuts button. When hidden, the status bar appears only for clipboard status. F1 always opens the full reference.",
         manager.show_keybinding_hints(),
     );
     bind_switch(
