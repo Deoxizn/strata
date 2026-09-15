@@ -226,7 +226,27 @@ fn abbreviate_home(path: &std::path::Path) -> String {
 
 fn append_sidebar_options(content: &gtk::Box, manager: &Rc<ThemeManager>) {
     let sidebar = super::settings_group(content, "SIDEBAR");
-    for switch in [
+    let chips = super::wrap::WrapRow::new(8);
+    let row = super::control_row(
+        "Items shown in sidebar",
+        "Toggle which locations appear in the sidebar.",
+        &chips,
+    );
+    row.set_orientation(gtk::Orientation::Vertical);
+    row.set_spacing(18);
+    sidebar.append(&row);
+    use crate::assets::icons;
+    let icons = [
+        icons::HOME,
+        icons::TRASH,
+        icons::GLOBE,
+        icons::MONITOR,
+        icons::DOCUMENTS,
+        icons::DOWNLOADS,
+        icons::PICTURES,
+        icons::VIDEOS,
+    ];
+    for (switch, icon) in [
         PreferenceSwitch {
             title: "Show Home in sidebar",
             description: "Show the Home folder in the sidebar.",
@@ -275,8 +295,26 @@ fn append_sidebar_options(content: &gtk::Box, manager: &Rc<ThemeManager>) {
             read: ThemeManager::sidebar_show_videos,
             write: ThemeManager::set_sidebar_show_videos,
         },
-    ] {
-        append_preference_switch(&sidebar, manager, switch);
+    ]
+    .into_iter()
+    .zip(icons)
+    {
+        let label = switch
+            .title
+            .trim_start_matches("Show ")
+            .trim_end_matches(" in sidebar");
+        let button = gtk::ToggleButton::new();
+        button.add_css_class("sidebar-place-chip");
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        content.append(&crate::assets::primary_icon(icon, 16));
+        content.append(&gtk::Label::new(Some(label)));
+        button.set_child(Some(&content));
+        button.update_property(&[
+            gtk::accessible::Property::Label(switch.title),
+            gtk::accessible::Property::Description(switch.description),
+        ]);
+        super::bindings::bind_toggle(manager, &button, switch.read, switch.write);
+        chips.append(&button);
     }
 }
 

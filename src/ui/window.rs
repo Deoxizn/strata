@@ -1068,22 +1068,25 @@ impl SidebarState {
 
     fn append_static_places(self: &Rc<Self>) {
         if self.theme_manager.sidebar_show_home() {
-            self.append_place(
-                crate::assets::icons::HOME,
-                "Home",
-                Location::local(home_directory()),
-            );
+            let location = Location::local(home_directory());
+            let row = self.append_place(crate::assets::icons::HOME, "Home", location.clone());
+            if !self.local_only {
+                self.attach_place_context_menu(&row, location, |state| {
+                    state.theme_manager.set_sidebar_show_home(false);
+                });
+            }
         }
         if !self.local_only {
             if self.theme_manager.sidebar_show_trash() {
                 self.append_trash_place();
             }
             if self.theme_manager.sidebar_show_network() {
-                self.append_place(
-                    crate::assets::icons::NETWORK,
-                    "Network",
-                    Location::uri("network:///"),
-                );
+                let location = Location::uri("network:///");
+                let row =
+                    self.append_place(crate::assets::icons::NETWORK, "Network", location.clone());
+                self.attach_place_context_menu(&row, location, |state| {
+                    state.theme_manager.set_sidebar_show_network(false);
+                });
             }
         }
         if self.has_visible_standard_places() && self.widget.first_child().is_some() {
@@ -1094,18 +1097,14 @@ impl SidebarState {
     }
 
     fn has_visible_standard_places(&self) -> bool {
-        self.place_order
-            .borrow()
-            .iter()
-            .copied()
-            .any(|place| {
-                self.standard_place_visible(place)
-                    && standard_place(place).is_some_and(|(_, _, directory)| {
-                        glib::user_special_dir(directory).is_some_and(|path| {
-                            should_show_standard_place(place, &path, &home_directory())
-                        })
+        self.place_order.borrow().iter().copied().any(|place| {
+            self.standard_place_visible(place)
+                && standard_place(place).is_some_and(|(_, _, directory)| {
+                    glib::user_special_dir(directory).is_some_and(|path| {
+                        should_show_standard_place(place, &path, &home_directory())
                     })
-            })
+                })
+        })
     }
 
     fn standard_place_visible(&self, id: &str) -> bool {
@@ -1398,6 +1397,8 @@ impl SidebarState {
         let menu = super::accessibility::menu_box();
         menu.add_css_class("folder-context-menu");
         let properties = sidebar_context_option(crate::assets::icons::INFO, "Properties", false);
+        let unpin = sidebar_context_option(crate::assets::icons::PIN, "Unpin", false);
+        menu.append(&unpin);
         let empty = sidebar_context_option(crate::assets::icons::TRASH, "Empty Trash…", true);
         empty.add_css_class("danger");
         let separator = gtk::Separator::new(gtk::Orientation::Horizontal);
@@ -1426,6 +1427,16 @@ impl SidebarState {
                 popover.popdown();
             }
             properties_view.show_location_properties(&Location::uri("trash:///"));
+        });
+        let unpin_popover = popover.downgrade();
+        let weak_state = Rc::downgrade(self);
+        unpin.connect_clicked(move |_| {
+            if let Some(popover) = unpin_popover.upgrade() {
+                popover.popdown();
+            }
+            if let Some(state) = weak_state.upgrade() {
+                state.theme_manager.set_sidebar_show_trash(false);
+            }
         });
         let empty_popover = popover.downgrade();
         let empty_view = self.view.clone();
@@ -1519,7 +1530,18 @@ impl SidebarState {
     ) {
         let row = sidebar_button(icon, name);
         row.set_tooltip_text(Some(&location.display_path()));
-        self.bind_place_row(&row, location, PlaceNavigation::Direct);
+        self.bind_place_row(&row, location.clone(), PlaceNavigation::Direct);
+        self.attach_place_context_menu(&row, location, move |state| {
+            let manager = &state.theme_manager;
+            match id {
+                "desktop" => manager.set_sidebar_show_desktop(false),
+                "documents" => manager.set_sidebar_show_documents(false),
+                "downloads" => manager.set_sidebar_show_downloads(false),
+                "pictures" => manager.set_sidebar_show_pictures(false),
+                "videos" => manager.set_sidebar_show_videos(false),
+                _ => {}
+            }
+        });
 
         self.make_reorderable(
             &row,
@@ -1762,6 +1784,18 @@ impl SidebarState {
     fn append_pinned_place(self: &Rc<Self>, index: usize, name: &str, location: Location) {
         let row = self.append_place(crate::assets::icons::FOLDER, name, location.clone());
         self.make_pinned_row_reorderable(&row, index);
+        let unpinned_location = location.clone();
+        self.attach_place_context_menu(&row, location, move |state| {
+            state.unpin_location(&unpinned_location);
+        });
+    }
+
+    fn attach_place_context_menu(
+        self: &Rc<Self>,
+        row: &gtk::Button,
+        location: Location,
+        on_unpin: impl Fn(&Rc<Self>) + 'static,
+    ) {
         let menu = super::accessibility::menu_box();
         menu.add_css_class("folder-context-menu");
         let unpin = sidebar_context_option(crate::assets::icons::PIN, "Unpin", false);
@@ -1774,17 +1808,16 @@ impl SidebarState {
             .has_arrow(false)
             .build();
         popover.add_css_class("folder-context-popover");
-        popover.set_parent(&row);
+        popover.set_parent(row);
 
         let weak_state = Rc::downgrade(self);
-        let unpinned_location = location.clone();
         let unpin_popover = popover.downgrade();
         unpin.connect_clicked(move |_| {
             if let Some(popover) = unpin_popover.upgrade() {
                 popover.popdown();
             }
             if let Some(state) = weak_state.upgrade() {
-                state.unpin_location(&unpinned_location);
+                on_unpin(&state);
             }
         });
         let properties_view = self.view.clone();
@@ -2780,10 +2813,7 @@ fn should_show_standard_place(id: &str, path: &std::path::Path, home: &std::path
     id != "desktop" || path != home
 }
 
-fn sidebar_standard_place_visible(
-    manager: &super::theme::ThemeManager,
-    id: &str,
-) -> bool {
+fn sidebar_standard_place_visible(manager: &super::theme::ThemeManager, id: &str) -> bool {
     match id {
         "desktop" => manager.sidebar_show_desktop(),
         "documents" => manager.sidebar_show_documents(),

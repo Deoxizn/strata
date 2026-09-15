@@ -158,11 +158,11 @@ impl SidebarState {
             &self.widget,
             ThemeManager::sidebar_places_visibility,
             move |_, visibility| {
-                if let Some(state) = weak.upgrade() {
-                    if *state.places_visibility.borrow() != visibility {
-                        state.places_visibility.replace(visibility);
-                        state.rebuild();
-                    }
+                if let Some(state) = weak.upgrade()
+                    && *state.places_visibility.borrow() != visibility
+                {
+                    state.places_visibility.replace(visibility);
+                    state.rebuild();
                 }
             },
         );

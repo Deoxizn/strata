@@ -355,6 +355,22 @@ fn standard_location(id: &str) -> Option<Location> {
     Some(Location::local(path))
 }
 
+fn context_action(widget: &gtk::Widget, title: &str) -> Option<gtk::Button> {
+    if let Some(label) = widget.downcast_ref::<gtk::Label>()
+        && label.text() == title
+    {
+        return widget.ancestor(gtk::Button::static_type()).and_downcast();
+    }
+    let mut child = widget.first_child();
+    while let Some(widget) = child {
+        if let Some(button) = context_action(&widget, title) {
+            return Some(button);
+        }
+        child = widget.next_sibling();
+    }
+    None
+}
+
 #[test]
 fn sidebar_visibility_prefs_hide_and_restore_default_places_across_windows() {
     gtk_test(
@@ -406,14 +422,23 @@ fn sidebar_visibility_prefs_hide_and_restore_default_places_across_windows() {
             assert!(has_location(&chooser, &home));
             assert!(!has_location(&chooser, &trash));
             assert!(!has_location(&chooser, &network));
-            manager.set_sidebar_show_home(false);
-            manager.set_sidebar_show_trash(false);
-            manager.set_sidebar_show_network(false);
-            manager.set_sidebar_show_desktop(false);
-            manager.set_sidebar_show_documents(false);
-            manager.set_sidebar_show_downloads(false);
-            manager.set_sidebar_show_pictures(false);
-            manager.set_sidebar_show_videos(false);
+            for (index, location) in [&home, &trash, &network]
+                .into_iter()
+                .chain(standards.iter().map(|(_, location)| location))
+                .enumerate()
+            {
+                let place = row(&sidebars[index % 2], location);
+                assert!(context_action(place.upcast_ref(), "Properties").is_some());
+                context_action(place.upcast_ref(), "Unpin")
+                    .expect("default place Unpin action")
+                    .emit_clicked();
+                for sidebar in &sidebars {
+                    assert!(!has_location(sidebar, location));
+                }
+            }
+            assert!(!manager.sidebar_show_home());
+            assert!(!manager.sidebar_show_trash());
+            assert!(!manager.sidebar_show_network());
             for sidebar in sidebars.iter().chain(std::iter::once(&chooser)) {
                 assert!(!has_location(sidebar, &home));
                 for (_, location) in &standards {
