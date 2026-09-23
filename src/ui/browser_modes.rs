@@ -3907,9 +3907,6 @@ fn install_preview_click(
         }
         if should_activate_pointer_click(press_count, entry.is_directory(), click_activation.get())
         {
-            // The chooser honors single-click folder navigation like the main window:
-            // directories only ever navigate, never accept. Files fall through so a
-            // single click selects/previews and double-click can still accept.
             if !browser.is_chooser_mode() || entry.is_directory() {
                 gesture.set_state(gtk::EventSequenceState::Claimed);
                 browser.activate_in_place(depth, position);
