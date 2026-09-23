@@ -94,6 +94,8 @@ impl Dispatcher {
                     | Modifiers::SUPER_MASK
                     | Modifiers::SHIFT_MASK,
             )
+            && !event.text_has_focus()
+            && !self.view.filter_has_focus()
             && let Some(entry) = self.view.selected_search_result()
         {
             if self.view.activate_directory_column() {

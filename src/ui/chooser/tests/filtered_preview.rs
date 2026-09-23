@@ -187,11 +187,23 @@ fn space_toggles_the_selected_search_result_in_open_and_save_choosers() {
                     ));
                     assert!(state.view.filter_has_focus());
                     assert_eq!(field.text(), "nested");
-                    assert!(!press(
-                        &window_keys,
-                        gtk::gdk::Key::space,
-                        gtk::gdk::ModifierType::SHIFT_MASK
-                    ));
+                    for modifiers in [
+                        gtk::gdk::ModifierType::empty(),
+                        gtk::gdk::ModifierType::SHIFT_MASK,
+                    ] {
+                        assert!(
+                            !press(&window_keys, gtk::gdk::Key::space, modifiers),
+                            "space in the filter must reach the text entry"
+                        );
+                        assert!(
+                            find(state.window.upcast_ref(), &|widget| {
+                                widget.is_mapped() && widget.has_css_class("preview-pane")
+                            })
+                            .is_none(),
+                            "space in the filter must not toggle preview"
+                        );
+                        assert_eq!(field.text(), "nested");
+                    }
                     let capture = |name| {
                         if mode == BrowserMode::Columns
                             && !save
@@ -202,6 +214,12 @@ fn space_toggles_the_selected_search_result_in_open_and_save_choosers() {
                         }
                     };
                     capture("before");
+                    assert!(press(
+                        &filter_keys,
+                        gtk::gdk::Key::Down,
+                        gtk::gdk::ModifierType::empty()
+                    ));
+                    assert!(!state.view.filter_has_focus());
                     for open in [true, false] {
                         assert!(press(
                             &window_keys,
@@ -224,7 +242,7 @@ fn space_toggles_the_selected_search_result_in_open_and_save_choosers() {
                                 .location,
                             Location::local(root.path().join("folder/nested.txt"))
                         );
-                        assert!(state.view.filter_has_focus());
+                        assert!(!state.view.filter_has_focus());
                         assert_eq!(
                             browser.active_location(),
                             Some(Location::local(root.path()))
@@ -247,6 +265,14 @@ fn space_toggles_the_selected_search_result_in_open_and_save_choosers() {
                         }
                     }
                     for recursive in [true, false] {
+                        if !state.view.filter_has_focus() {
+                            assert!(press(
+                                &window_keys,
+                                gtk::gdk::Key::f,
+                                gtk::gdk::ModifierType::CONTROL_MASK
+                            ));
+                            assert!(state.view.filter_has_focus());
+                        }
                         state.view.dismiss_focused_filter();
                         browser.navigate(Location::local(root.path()));
                         wait_until(|| {

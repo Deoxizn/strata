@@ -1561,6 +1561,11 @@ fn install_shortcuts(
                     | gtk::gdk::ModifierType::SUPER_MASK
                     | gtk::gdk::ModifierType::SHIFT_MASK,
             )
+            && !focused.as_ref().is_some_and(|widget| {
+                super::focus_navigation::editable(widget)
+                    || super::focus_navigation::in_popover(widget)
+            })
+            && !state.view.filter_has_focus()
             && let Some(entry) = state.view.selected_search_result()
         {
             if state.view.activate_directory_column() {
