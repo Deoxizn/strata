@@ -356,7 +356,6 @@ impl ModeViews {
             .hexpand(true)
             .vexpand(true)
             .build();
-        icons_scroll.add_css_class("fixed-scrollbar");
         icons_scroll.add_css_class("mode-scroll");
 
         let list_root = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -438,7 +437,9 @@ impl ModeViews {
             BrowserMode::Icons => self.icons_panes.first(),
             BrowserMode::List => self.list_pane.as_ref(),
         }?;
-        Some(pane.marquee.clone())
+        pane.search
+            .active_marquee()
+            .or_else(|| Some(pane.marquee.clone()))
     }
 
     fn single_pane(&self) -> Option<&Pane> {
@@ -1718,7 +1719,7 @@ struct IconsControls {
 
 pub(crate) fn filter_controls(tooltip: &str) -> (gtk::Entry, gtk::Revealer, gtk::ToggleButton) {
     let entry = gtk::Entry::builder()
-        .placeholder_text("Filter items…")
+        .placeholder_text(super::browser::filter_placeholder(0))
         .tooltip_text("Filter by name. Use * for any characters: *.png, IMG*, or IMG*.png.")
         .has_frame(false)
         .hexpand(true)
@@ -2001,7 +2002,6 @@ fn build_icons_pane(
         .hscrollbar_policy(gtk::PolicyType::Automatic)
         .vexpand(true)
         .build();
-    scroll.add_css_class("fixed-scrollbar");
     scroll.add_css_class("browser-listing-scroll");
     super::scrolling::popover::dismiss_on_outside_scroll(&controls.thumbnail_popover);
     let browser_for_settle = Rc::downgrade(&context.browser);
@@ -2036,7 +2036,13 @@ fn build_icons_pane(
         pin_ungrouped_icons_columns(&section, width, context.density.get());
     });
     let targets: super::marquee::MarqueeTargets = Rc::new(RefCell::new(Vec::new()));
-    let (collection, marquee) = collection_with_marquee(&root, scroll, targets.clone(), false);
+    let (collection, marquee) = collection_with_marquee(
+        &root,
+        scroll,
+        targets.clone(),
+        false,
+        context.click.multiple_selection.clone(),
+    );
     let search = super::inline_search::wrap(
         &collection,
         &controls.filter_entry,
@@ -2969,7 +2975,6 @@ fn build_list_pane(
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vexpand(true)
         .build();
-    scroll.add_css_class("fixed-scrollbar");
     scroll.add_css_class("browser-listing-scroll");
     scroll.add_css_class("list-listing-scroll");
     let browser_for_settle = Rc::downgrade(&browser);
@@ -2992,8 +2997,13 @@ fn build_list_pane(
     table.set_vexpand(true);
     table.append(&headings);
     let targets: super::marquee::MarqueeTargets = Rc::new(RefCell::new(Vec::new()));
-    let (collection, marquee) =
-        collection_with_marquee(view.upcast_ref(), scroll, targets.clone(), true);
+    let (collection, marquee) = collection_with_marquee(
+        view.upcast_ref(),
+        scroll,
+        targets.clone(),
+        true,
+        click_options.multiple_selection.clone(),
+    );
     table.append(&collection);
     marquee.add_origin_surface(&header);
     marquee.add_origin_surface(&headings);
@@ -3004,7 +3014,6 @@ fn build_list_pane(
         .hexpand(true)
         .vexpand(true)
         .build();
-    table_scroll.add_css_class("fixed-scrollbar");
     table_scroll.add_css_class("mode-scroll");
     if let Some(viewport) = table_scroll.child().and_downcast::<gtk::Viewport>() {
         // The outer viewport must not horizontally reveal oversized metadata rows; the inner
@@ -3297,6 +3306,7 @@ fn collection_with_marquee(
     scroll: gtk::ScrolledWindow,
     targets: super::marquee::MarqueeTargets,
     list_rows: bool,
+    multiple_selection: Rc<Cell<bool>>,
 ) -> (gtk::Overlay, super::marquee::Marquee) {
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&scroll));
@@ -3329,6 +3339,7 @@ fn collection_with_marquee(
                 selection.unselect_all();
             }
         }),
+        allow_drag: multiple_selection,
     });
     (overlay, marquee)
 }
@@ -3892,7 +3903,7 @@ fn install_preview_click(
             gesture.set_state(gtk::EventSequenceState::Claimed);
             if press_count == 1 {
                 browser.select(depth, position);
-                if !browser.is_chooser_mode()
+                if (!browser.is_chooser_mode() || entry.is_directory())
                     && (!is_trash_location(&entry.location) || entry.is_directory())
                 {
                     browser.activate_in_place(depth, position);
@@ -3907,8 +3918,8 @@ fn install_preview_click(
         }
         if should_activate_pointer_click(press_count, entry.is_directory(), click_activation.get())
         {
-            gesture.set_state(gtk::EventSequenceState::Claimed);
-            if !browser.is_chooser_mode() {
+            if !browser.is_chooser_mode() || entry.is_directory() {
+                gesture.set_state(gtk::EventSequenceState::Claimed);
                 browser.activate_in_place(depth, position);
             }
         } else if press_count == 1
@@ -4007,6 +4018,14 @@ fn connect_selection(
             }
             let selected_positions =
                 selected_source_positions(&source_index, &view_model, selection);
+            let changed_end = position.saturating_add(count) as usize;
+            let toggled = bitset_positions(&selection.selection())
+                .into_iter()
+                .rev()
+                .find(|candidate| *candidate >= position as usize && *candidate < changed_end)
+                .and_then(|position| {
+                    source_position_for_view(&source_index, Some(&view_model), position as u32)
+                });
             let native_focus = weak_view
                 .upgrade()
                 .and_then(|view| view.root())
@@ -4027,7 +4046,9 @@ fn connect_selection(
                     source_position_for_view(&source_index, Some(&view_model), position)
                 })
                 .filter(|position| selected_positions.contains(position));
-            let focused = native_focus.or_else(|| selected_positions.last().copied());
+            let focused = toggled
+                .or(native_focus)
+                .or_else(|| selected_positions.last().copied());
             sync_browser_selection(&sections, &browser, depth, &source_index, focused);
         });
 }
@@ -4239,6 +4260,9 @@ fn reconnect_pane_model(pane: &Pane) {
 
 fn show_count(pane: &Pane) {
     let count = pane.model.n_items();
+    if let Some(entry) = &pane.filter_entry {
+        entry.set_placeholder_text(Some(&super::browser::filter_placeholder(count as usize)));
+    }
     if count == 0 {
         pane.status.remove_css_class("error");
         pane.status.set_label("This directory is empty");
