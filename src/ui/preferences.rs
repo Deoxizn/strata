@@ -907,6 +907,9 @@ impl PreferenceManager {
 
     pub fn set_restore_tabs(&self, enabled: bool) {
         self.preferences.borrow_mut().restore_tabs = enabled;
+        if !enabled {
+            super::tabs_session::remove();
+        }
         self.save_preferences();
     }
 

@@ -402,12 +402,6 @@ impl TabWindow {
         }
     }
 
-    /// Saves the window's tabs in strip order with the active tab's position.
-    /// Tabs without a committed location yet are skipped; when restore is
-    /// disabled the saved session is cleared instead. Only plain-launch
-    /// windows persist, so explicit targets, reveal requests, and unlock flows
-    /// stay in-memory and cannot clobber the session. With several
-    /// plain-launch windows open the most recently changed one wins.
     fn persist_session(&self) {
         if !self.persist || self.restoring.get() {
             return;
@@ -435,8 +429,6 @@ impl TabWindow {
         tabs_session::save(&locations, active);
     }
 
-    /// Reopens the previous session's tabs on a plain launch. Returns whether
-    /// anything was restored; the caller falls back to the default directory.
     pub(in crate::ui::window) fn try_restore(self: &Rc<Self>) -> bool {
         if !self.preferences.restore_tabs() {
             return false;

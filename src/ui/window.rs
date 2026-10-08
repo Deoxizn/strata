@@ -251,8 +251,6 @@ pub(super) fn present_target(
     window.present();
     crate::metrics::mark_window_presented();
     if auto_navigate {
-        // Tab restore only applies to plain launches: explicit locations,
-        // reveal requests, and unlock flows bypass it.
         let restore = restore_tabs && location.is_none();
         let pending_location = location.unwrap_or_else(|| startup_location(&preference_manager));
         let idle_browser = browser.clone();

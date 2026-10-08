@@ -692,17 +692,18 @@ fn tab_changes_persist_for_the_next_launch() {
             for directory in [&alpha, &beta] {
                 std::fs::create_dir_all(directory).expect("session directory");
             }
-            let (first_window, first) = open();
+            let app = application();
+            let (first_window, first) = open_in(&app);
             load(&first.active_browser(), Location::local(&alpha));
             wait_until(|| {
                 saved_session().is_some_and(|session| session.tabs == vec![Location::local(&alpha)])
             });
-            let (second_window, second) = open();
+            let (second_window, second) = open_in(&app);
             load(&second.active_browser(), Location::local(&beta));
             wait_until(|| {
                 saved_session().is_some_and(|session| session.tabs == vec![Location::local(&beta)])
             });
-            let (third_window, third) = open();
+            let (third_window, third) = open_in(&app);
             assert!(third.try_restore());
             wait_until(|| tab_locations(&third) == vec![Some(Location::local(&beta))]);
             assert_eq!(third.tabs.borrow().len(), 1);
