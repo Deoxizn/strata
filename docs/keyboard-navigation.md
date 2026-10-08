@@ -25,7 +25,16 @@ The last tab's close shortcut closes the window.
 The regular-mode terminal shortcut is **Ctrl+Alt+T**; 10xer keeps **;**, then **t**.
 
 Each tab retains its location, selection, navigation history, preview and search
-state. Tabs are in-memory only. Appearance preferences and the clipboard remain
+state. Tab locations persist across restarts: a plain launch (no folder
+argument, reveal request, or unlock target) reopens the previous tabs in order
+with the previously active tab selected, when **Settings → General → Startup →
+Restore open tabs** is on (the default). Missing directories, credential-bearing
+URIs, and transient locations such as trashed-item children, non-root Recent
+entries, and camera roots are skipped; with nothing restorable the window opens
+at the default directory as before. Windows opened for an explicit folder,
+reveal request, or unlock target never overwrite the saved session; with
+several plain-launch windows open the most recently changed one wins. Selection, history, and preview state stay
+in-memory. Appearance preferences and the clipboard remain
 shared. File operations prevent closing their tab or window until they finish
 or are cancelled.
 

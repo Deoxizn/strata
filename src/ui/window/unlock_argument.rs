@@ -50,7 +50,7 @@ impl UnlockTarget {
 }
 
 pub fn present_unlock(application: &gtk::Application, target: UnlockTarget) -> BrowserView {
-    let browser = present_target(application, None, Vec::new(), false, true);
+    let browser = present_target(application, None, Vec::new(), false, true, false);
     start_unlock(browser.clone(), target);
     browser
 }

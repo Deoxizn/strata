@@ -179,7 +179,7 @@ fn mouse_history_action(button: u32) -> Option<MouseHistoryAction> {
 }
 
 pub fn present(application: &gtk::Application) {
-    present_target(application, None, Vec::new(), false, true);
+    present_target(application, None, Vec::new(), false, true, true);
 }
 
 /// Opens the requested directory with the named items selected.
@@ -190,6 +190,7 @@ pub fn present_reveal(application: &gtk::Application, request: RevealRequest) {
         request.selection,
         request.properties,
         true,
+        false,
     );
 }
 
@@ -226,6 +227,7 @@ pub(super) fn present_target(
     selection: Vec<Location>,
     properties: bool,
     auto_navigate: bool,
+    restore_tabs: bool,
 ) -> BrowserView {
     let present_started = std::time::Instant::now();
     crate::assets::register_icon_theme();
@@ -244,16 +246,24 @@ pub(super) fn present_target(
         .default_height(760)
         .build();
 
-    let tabs = composition::TabWindow::new(&window, &preference_manager);
+    let tabs = composition::TabWindow::new(&window, &preference_manager, restore_tabs);
     let browser = tabs.active_browser();
     window.present();
     crate::metrics::mark_window_presented();
     if auto_navigate {
+        // Tab restore only applies to plain launches: explicit locations,
+        // reveal requests, and unlock flows bypass it.
+        let restore = restore_tabs && location.is_none();
         let pending_location = location.unwrap_or_else(|| startup_location(&preference_manager));
         let idle_browser = browser.clone();
         glib::idle_add_local_once(move || {
             let started = std::time::Instant::now();
-            if selection.is_empty() {
+            if restore && tabs.try_restore() {
+                tracing::debug!(
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "present tab session restored"
+                );
+            } else if selection.is_empty() {
                 idle_browser.navigate_location(pending_location);
             } else {
                 idle_browser.reveal_locations(pending_location, selection, properties);

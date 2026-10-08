@@ -67,6 +67,16 @@ pub(super) fn general_page(
 
     let startup = super::settings_group(&preferences, "STARTUP");
     append_default_directory_option(&startup, &manager);
+    append_preference_switch(
+        &startup,
+        &manager,
+        PreferenceSwitch {
+            title: "Restore open tabs",
+            description: "Reopen your tabs from the last session when launching Strata without a target.",
+            read: PreferenceManager::restore_tabs,
+            write: PreferenceManager::set_restore_tabs,
+        },
+    );
 
     (
         scrollable_page(&preferences, None),

@@ -27,6 +27,7 @@ pub fn present_open(application: &gtk::Application, file: gio::File) {
         Vec::new(),
         false,
         false,
+        false,
     );
     classify(browser, file, location);
 }

@@ -796,6 +796,7 @@ fn all_preference_setters_publish_and_persist_without_duplicate_notifications() 
                 |m| m.set_cross_volume_drop_strategy(CrossVolumeDropStrategy::Copy),
                 |m| m.set_date_format(crate::util::DateFormat::Long),
                 |m| m.set_default_directory(None),
+                |m| m.set_restore_tabs(true),
                 |m| m.set_device_label("volume:fixture-kingston", "Photos / 📁"),
                 |m| m.set_device_label("volume:fixture-kingston", ""),
                 |m| {

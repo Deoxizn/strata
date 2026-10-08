@@ -169,6 +169,8 @@ pub(in crate::ui) struct Preferences {
     release_channel: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     default_directory: Option<PathBuf>,
+    #[serde(default = "default_enabled")]
+    restore_tabs: bool,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     folder_colors: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -267,6 +269,7 @@ impl Default for Preferences {
             date_format: default_date_format(),
             release_channel: default_release_channel(),
             default_directory: None,
+            restore_tabs: true,
             folder_colors: HashMap::new(),
             custom_icons: HashMap::new(),
             send_to_recent_destinations: HashMap::new(),
@@ -895,6 +898,15 @@ impl PreferenceManager {
 
     pub fn set_default_directory(&self, path: Option<PathBuf>) {
         self.preferences.borrow_mut().default_directory = path;
+        self.save_preferences();
+    }
+
+    pub fn restore_tabs(&self) -> bool {
+        self.preferences.borrow().restore_tabs
+    }
+
+    pub fn set_restore_tabs(&self, enabled: bool) {
+        self.preferences.borrow_mut().restore_tabs = enabled;
         self.save_preferences();
     }
 

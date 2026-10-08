@@ -42,6 +42,7 @@ mod settings;
 mod shortcut_footer;
 mod shortcut_reference;
 mod table_view;
+mod tabs_session;
 mod tenxer_mode;
 mod terminal;
 mod theme;

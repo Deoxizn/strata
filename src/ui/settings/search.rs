@@ -42,6 +42,12 @@ const TARGETS: &[Target] = &[
         aliases: "startup launch home folder reset",
     },
     Target {
+        id: "restore-tabs",
+        page: "general",
+        title: "Restore open tabs",
+        aliases: "startup launch session reopen tabs",
+    },
+    Target {
         id: "peeking",
         page: "general",
         title: "Folder peeking",
