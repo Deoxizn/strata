@@ -78,21 +78,14 @@ impl TabWindow {
         super::super::install_modal_focus_trap(window);
         tenxer_splash::install(window, &overlay, preferences);
         let weak = Rc::downgrade(&state);
-        window.connect_close_request(move |window| {
-            let Some(state) = weak.upgrade() else {
-                return glib::Propagation::Proceed;
-            };
-            if state
+        crate::ui::close_guard::install(window, move |_| {
+            let state = weak.upgrade()?;
+            state
                 .tabs
                 .borrow()
                 .iter()
                 .any(|tab| tab.content.browser.browser().has_background_operations())
-            {
-                operations_active(window);
-                glib::Propagation::Stop
-            } else {
-                glib::Propagation::Proceed
-            }
+                .then(operations_active)
         });
         let retained = state.clone();
         window.connect_unrealize(move |window| {
@@ -247,7 +240,7 @@ impl TabWindow {
             .browser()
             .has_background_operations()
         {
-            operations_active(&window);
+            operations_active().show(window.upcast_ref());
             return;
         }
         if tabs.len() == 1 {
@@ -292,11 +285,15 @@ impl TabWindow {
                 header.actions.prepend(&header.new_tab);
                 header.actions.append(&header.close);
                 header.new_tab.set_visible(!multiple);
-                header.close.set_visible(!multiple);
+                header
+                    .close
+                    .set_visible(!multiple && self.preferences.window_show_close());
             }
             if tab.id == self.active.get() {
                 header.new_tab.set_visible(true);
-                header.close.set_visible(true);
+                header
+                    .close
+                    .set_visible(self.preferences.window_show_close());
             }
         }
         self.strip.hints(self.hints.get());
@@ -535,12 +532,13 @@ impl TabWindow {
     }
 }
 
-fn operations_active(window: &gtk::ApplicationWindow) {
-    crate::ui::modal::show_error_dialog(
-        window,
-        "File operations are still active",
-        "Wait for these operations to finish, or cancel them before closing this tab or window. Cancellation does not undo completed changes.",
-    );
+fn operations_active() -> crate::ui::close_guard::CloseBlocker {
+    crate::ui::close_guard::CloseBlocker {
+        title: crate::i18n::tr("File operations are still active"),
+        detail: crate::i18n::tr(
+            "Wait for these operations to finish, or cancel them before closing this tab or window. Cancellation does not undo completed changes.",
+        ),
+    }
 }
 
 pub(in crate::ui::window) fn is_tab_shortcut(key: gdk::Key, modifiers: gdk::ModifierType) -> bool {
